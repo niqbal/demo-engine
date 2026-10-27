@@ -1,0 +1,24 @@
+{
+  "name": "demo-engine-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "vitest run",
+    "typecheck": "tsc -b packages/core packages/render packages/cli packages/playwright",
+    "demo": "node packages/cli/dist/index.js",
+    "example": "node packages/cli/dist/index.js build examples/todomvc/demos --base-url https://demo.playwright.dev/todomvc --out examples/todomvc/.demo-engine"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.7"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

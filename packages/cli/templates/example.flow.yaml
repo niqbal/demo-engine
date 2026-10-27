@@ -1,0 +1,18 @@
+# One flow = one video. Steps are user-facing locators + a sentence of narration.
+name: Example walkthrough
+description: Replace this with a real flow from your product.
+url: ${BASE_URL}/
+# Optional: globs in your repo that, when changed, mark this flow as affected
+# (`demo-engine changed --since origin/main`, `build --since ...`).
+touches:
+  - "src/**"
+# Optional: authenticated flows
+# auth:
+#   storageState: .auth/user.json     # produced by your login script
+#   login: demos/login.example.mjs    # or run a login script before the flow
+steps:
+  - say: Open the page and show the main navigation.
+    expect: { visible: { role: navigation } }
+  - say: Click the primary call to action.
+    click: { role: button, name: Get started }
+    zoom: { scale: 1.4 }

@@ -1,0 +1,21 @@
+{
+  "name": "demo-engine",
+  "version": "0.1.0",
+  "description": "Demos as code. Record a product walkthrough once; re-run, diff, heal and re-render it on every release.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "bin": {
+    "demo-engine": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "files": ["dist", "templates", "README.md"],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@demo-engine/core": "0.1.0",
+    "@demo-engine/render": "0.1.0",
+    "commander": "^15.0.0"
+  },
+  "keywords": ["playwright", "demo", "product-video", "remotion", "docs", "ci"]
+}

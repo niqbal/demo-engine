@@ -1,0 +1,6 @@
+baseUrl: https://demo.playwright.dev/todomvc
+out: .demo-engine
+demos: demos
+brand:
+  accent: "#E11D48"
+  title: TodoMVC

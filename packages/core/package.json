@@ -1,0 +1,33 @@
+{
+  "name": "@demo-engine/core",
+  "version": "0.1.0",
+  "description": "Demos as code: run, diff, heal and narrate product walkthroughs with Playwright.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.3.0",
+    "@types/picomatch": "^4.0.3",
+    "openai": "^7.45.1",
+    "picomatch": "^4.0.7",
+    "pixelmatch": "^8.0.0",
+    "playwright": "^1.64.1",
+    "pngjs": "^7.0.0",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/pngjs": "^6.0.5"
+  }
+}

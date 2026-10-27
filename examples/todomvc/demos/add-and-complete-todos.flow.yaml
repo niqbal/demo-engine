@@ -1,0 +1,26 @@
+name: Add and complete todos
+description: Add tasks, check them off and filter the list.
+url: ${BASE_URL}/
+touches:
+  - "src/todo/**"
+  - "src/components/TodoList*"
+steps:
+  - say: Type a task and press Enter to add it to the list.
+    fill: { target: { placeholder: "What needs to be done?" }, value: "Buy oat milk" }
+    press: Enter
+    expect: { text: "Buy oat milk" }
+  - say: Add a couple more tasks the same way.
+    type: { target: { placeholder: "What needs to be done?" }, value: "Write the launch post" }
+    press: Enter
+    expect: { text: "Write the launch post" }
+  - say: Check a task off when it's done.
+    click: { role: checkbox, name: "Toggle Todo", nth: 0 }
+    zoom: { scale: 1.5 }
+  - say: Filter the list to see only what's still active.
+    click: { role: link, name: "Active" }
+    expect: { text: "Write the launch post" }
+  - say: Switch back to All and clear completed tasks in one click.
+    click: { role: link, name: "All" }
+  - say: Clear completed removes everything you've finished.
+    click: { role: button, name: "Clear completed" }
+    expect: { hidden: { text: "Buy oat milk" } }

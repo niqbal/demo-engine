@@ -1,0 +1,23 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: npm }
+      - run: npm ci --legacy-peer-deps
+      - run: npm run build
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - name: Example end-to-end (silent, no keys)
+        working-directory: examples/todomvc
+        run: node ../../packages/cli/dist/index.js build demos --no-narrate
+      - uses: actions/upload-artifact@v4
+        with:
+          name: example-renders
+          path: examples/todomvc/.demo-engine/renders/**

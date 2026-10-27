@@ -1,0 +1,114 @@
+name: "demo-engine"
+description: "Demos as code: re-run, diff, heal and re-render narrated product walkthroughs on every release."
+author: "niqbal"
+branding:
+  icon: "film"
+  color: "purple"
+inputs:
+  base-url:
+    description: "Base URL of the app under demo"
+    required: true
+  flows:
+    description: "Flow files or directories (space separated)"
+    default: "demos"
+  since:
+    description: "Git ref; only flows whose `touches` match changed files are reported as affected"
+    default: ""
+  only-affected:
+    description: "Skip flows not affected by changes since `since`"
+    default: "false"
+  heal:
+    description: "Attempt to repair broken locators"
+    default: "true"
+  write-heals:
+    description: "Write verified repairs to the flow files (pair with a PR-creating step)"
+    default: "false"
+  bless:
+    description: "Bless passing runs as the new baseline"
+    default: "false"
+  render:
+    description: "Render videos"
+    default: "true"
+  out:
+    description: "Output directory"
+    default: ".demo-engine"
+  comment:
+    description: "Post the report as a pull request comment"
+    default: "false"
+  version:
+    description: "demo-engine npm version"
+    default: "latest"
+  fail-on-broken:
+    description: "Fail the job when a flow is broken"
+    default: "true"
+  upload-artifacts:
+    description: "Upload renders and reports as a workflow artifact"
+    default: "true"
+outputs:
+  report:
+    description: "Path to report.md"
+    value: ${{ steps.build.outputs.report }}
+  broken:
+    description: "true when any flow is broken"
+    value: ${{ steps.build.outputs.broken }}
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+    - name: Install demo-engine
+      shell: bash
+      run: |
+        npm install -g "demo-engine@${{ inputs.version }}"
+        npx --yes playwright@1.64.1 install --with-deps chromium
+    - name: Build demos
+      id: build
+      shell: bash
+      env:
+        DEMO_BASE_URL: ${{ inputs['base-url'] }}
+      run: |
+        set +e
+        args=(build ${{ inputs.flows }} --out "${{ inputs.out }}")
+        [ -n "${{ inputs.since }}" ] && args+=(--since "${{ inputs.since }}")
+        [ "${{ inputs['only-affected'] }}" = "true" ] && args+=(--only-affected)
+        [ "${{ inputs.heal }}" = "false" ] && args+=(--no-heal)
+        [ "${{ inputs['write-heals'] }}" = "true" ] && args+=(--write-heals)
+        [ "${{ inputs.bless }}" = "true" ] && args+=(--bless)
+        [ "${{ inputs.render }}" = "false" ] && args+=(--no-render)
+        [ "${{ inputs['fail-on-broken'] }}" = "false" ] && args+=(--no-fail-on-broken)
+        demo-engine "${args[@]}"
+        code=$?
+        echo "report=${{ inputs.out }}/report.md" >> "$GITHUB_OUTPUT"
+        echo "broken=$([ $code -ne 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+        cat "${{ inputs.out }}/report.md" >> "$GITHUB_STEP_SUMMARY" || true
+        exit $code
+    - name: Upload renders and reports
+      if: ${{ always() && inputs['upload-artifacts'] == 'true' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: demo-engine
+        path: |
+          ${{ inputs.out }}/renders/**
+          ${{ inputs.out }}/reports/**
+          ${{ inputs.out }}/report.md
+          ${{ inputs.out }}/report.json
+        if-no-files-found: ignore
+    - name: Comment on pull request
+      if: ${{ always() && inputs.comment == 'true' && github.event_name == 'pull_request' }}
+      uses: actions/github-script@v7
+      env:
+        REPORT: ${{ inputs.out }}/report.md
+      with:
+        script: |
+          const fs = require('fs');
+          let body;
+          try { body = fs.readFileSync(process.env.REPORT, 'utf8'); } catch { return; }
+          const marker = '<!-- demo-engine-report -->';
+          body = marker + '\n' + body + `\n_Renders are attached to this workflow run as the **demo-engine** artifact._`;
+          const { owner, repo } = context.repo;
+          const issue_number = context.payload.pull_request.number;
+          const comments = await github.rest.issues.listComments({ owner, repo, issue_number, per_page: 100 });
+          const mine = comments.data.find(c => c.body && c.body.startsWith(marker));
+          if (mine) await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+          else await github.rest.issues.createComment({ owner, repo, issue_number, body });

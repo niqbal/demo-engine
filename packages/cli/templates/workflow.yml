@@ -1,0 +1,26 @@
+name: demos
+on:
+  pull_request:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  demos:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      # Start your app (or point base-url at a preview/staging deployment).
+      # - run: npm ci && npm run build && (npm start &) && npx wait-on http://localhost:3000
+      - uses: niqbal/demo-engine@v0
+        with:
+          base-url: ${{ vars.DEMO_BASE_URL || 'http://localhost:3000' }}
+          since: ${{ github.event.pull_request.base.sha || '' }}
+          comment: ${{ github.event_name == 'pull_request' }}
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}

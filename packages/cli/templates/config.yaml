@@ -1,0 +1,11 @@
+# demo-engine configuration — https://github.com/niqbal/demo-engine
+baseUrl: __BASE_URL__       # or pass --base-url / DEMO_BASE_URL
+out: .demo-engine           # runs, caches and renders live here (gitignored)
+demos: demos                # where *.flow.yaml files live
+tts: auto                   # auto | elevenlabs | openai | kokoro | say | silent
+llm: auto                   # auto | anthropic | openai | none
+fps: 30
+captions: true
+brand:
+  accent: "#4F46E5"
+  background: "#0B0F19"

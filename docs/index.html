@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>demo-engine — Demos as code</title>
+<meta name="description" content="Record a product walkthrough once. Every release it re-runs, detects what changed, repairs itself and re-renders the narrated video. Open source.">
+<meta property="og:title" content="demo-engine — Demos as code">
+<meta property="og:description" content="Your product demo, re-rendered on every release. Open source, runs in CI.">
+<meta property="og:image" content="https://niqbal.github.io/demo-engine/assets/poster.png">
+<style>
+:root{--bg:#0B0F19;--fg:#F3F4F6;--muted:#9CA3AF;--accent:#4F46E5;--accent2:#E11D48;--card:#111827;--line:#1F2937;--code:#0f172a}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 Inter,-apple-system,Segoe UI,Helvetica,Arial,sans-serif}
+a{color:#A5B4FC;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:1040px;margin:0 auto;padding:0 20px}
+header{padding:28px 0;display:flex;justify-content:space-between;align-items:center}
+.logo{font-weight:800;letter-spacing:-.5px;font-size:20px}.logo b{color:var(--accent2)}
+nav a{margin-left:20px;color:var(--muted)}
+.hero{padding:56px 0 24px;display:grid;grid-template-columns:1.1fr 1fr;gap:40px;align-items:center}
+h1{font-size:clamp(34px,5vw,56px);line-height:1.05;letter-spacing:-1.5px;margin:0 0 18px}
+h1 span{color:#A5B4FC}
+.lead{font-size:19px;color:#D1D5DB;max-width:520px}
+.cta{margin-top:26px;display:flex;gap:12px;flex-wrap:wrap}
+.btn{display:inline-block;padding:12px 18px;border-radius:10px;font-weight:600;background:var(--accent);color:#fff}
+.btn.alt{background:transparent;border:1px solid #374151;color:#E5E7EB}
+pre{background:var(--code);border:1px solid var(--line);border-radius:12px;padding:16px 18px;overflow:auto;font:13.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:#E2E8F0;margin:0}
+.k{color:#93C5FD}.s{color:#FDE68A}.c{color:#6B7280}
+.video{border-radius:14px;overflow:hidden;border:1px solid var(--line);box-shadow:0 30px 80px rgba(0,0,0,.5);background:#000}
+.video img,.video video{display:block;width:100%}
+section{padding:48px 0;border-top:1px solid var(--line)}
+h2{font-size:28px;letter-spacing:-.6px;margin:0 0 10px}
+.sub{color:var(--muted);margin:0 0 28px;max-width:640px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px}
+.card h3{margin:0 0 8px;font-size:17px}.card p{margin:0;color:#CBD5E1;font-size:15px}
+.num{display:inline-block;width:26px;height:26px;border-radius:8px;background:var(--accent);color:#fff;font-weight:700;text-align:center;line-height:26px;font-size:13px;margin-bottom:10px}
+table{width:100%;border-collapse:collapse;font-size:15px}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:600}
+.pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;background:#1E1B4B;color:#C7D2FE}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+footer{padding:40px 0;color:var(--muted);font-size:14px;border-top:1px solid var(--line)}
+@media(max-width:860px){.hero,.grid,.two{grid-template-columns:1fr}nav a{margin-left:12px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="logo">demo<b>-</b>engine</div>
+  <nav><a href="#how">How it works</a><a href="#integrate">Integrate</a><a href="https://github.com/niqbal/demo-engine">GitHub</a><a href="https://www.npmjs.com/package/demo-engine">npm</a></nav>
+</header>
+
+<div class="hero">
+  <div>
+    <h1>Your product demo,<br><span>re-rendered on every release.</span></h1>
+    <p class="lead">Record a walkthrough once as code. demo-engine re-runs it in CI, detects what changed, repairs broken steps and re-renders the narrated video. Your help center never shows last year's UI again.</p>
+    <div class="cta">
+      <a class="btn" href="https://github.com/niqbal/demo-engine#quick-start">Get started</a>
+      <a class="btn alt" href="https://github.com/niqbal/demo-engine">Star on GitHub</a>
+    </div>
+    <p style="color:var(--muted);font-size:14px;margin-top:18px">Open source · Apache-2.0 · Playwright + Remotion · no API keys required</p>
+  </div>
+  <div class="video"><img src="assets/demo.gif" alt="A rendered demo: cursor moves, clicks, zooms, captions and voice-over"></div>
+</div>
+
+<section id="how">
+  <h2>One command. Six stages.</h2>
+  <p class="sub"><code>npx demo-engine build demos --base-url https://staging.example.com</code></p>
+  <div class="grid">
+    <div class="card"><div class="num">1</div><h3>Run</h3><p>Headless Chromium executes the flow and captures a crisp 2× frame before and after every step. Animations off, fonts awaited, UTC. Deterministic.</p></div>
+    <div class="card"><div class="num">2</div><h3>Diff</h3><p>Against the last blessed run: locator resolution, masked pixel diff, accessibility-tree text diff. Each step is unchanged, cosmetic, changed or broken.</p></div>
+    <div class="card"><div class="num">3</div><h3>Heal</h3><p>Broken locators get a replacement (LLM, or an offline matcher), verified by re-running. The old locator stays as a fallback. You review the diff.</p></div>
+    <div class="card"><div class="num">4</div><h3>Narrate</h3><p>Scripts are polished once and cached per line. Only changed sentences are re-synthesized, so the voice never drifts between releases.</p></div>
+    <div class="card"><div class="num">5</div><h3>Render</h3><p>Remotion composes screenshots, a synthesized cursor, click ripples, zooms, captions and voice into an MP4. Unchanged flows keep their video.</p></div>
+    <div class="card"><div class="num">6</div><h3>Report</h3><p>A markdown table lands on the pull request. Broken flows fail the job. Your demos are now smoke tests.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>A flow is a file your team can review.</h2>
+  <p class="sub">User-facing locators, one sentence of narration per step, and the paths in your repo that affect it.</p>
+  <div class="two">
+<pre><span class="c"># demos/invite-teammate.flow.yaml</span>
+<span class="k">name</span>: Invite a teammate
+<span class="k">url</span>: ${BASE_URL}/settings/team
+<span class="k">touches</span>: [<span class="s">"src/settings/team/**"</span>]
+<span class="k">steps</span>:
+  - <span class="k">say</span>: Open Team settings from the sidebar.
+    <span class="k">click</span>: { role: link, name: Team }
+  - <span class="k">say</span>: Click Invite and enter an email.
+    <span class="k">click</span>: { role: button, name: Invite member }
+  - <span class="k">say</span>: Pick a role. Admins can manage billing.
+    <span class="k">select</span>: { target: { label: Role }, option: Admin }
+    <span class="k">zoom</span>: { scale: 1.6 }
+  - <span class="k">say</span>: Send the invite.
+    <span class="k">click</span>: { role: button, name: Send invite }
+    <span class="k">expect</span>: { text: Invite sent }</pre>
+<pre><span class="c">## demo-engine report</span>
+
+✏️ 1 changed · 1 rendered · 4 flows in 61s
+
+| flow              | status    | notes                     |
+|-------------------|-----------|---------------------------|
+| Invite a teammate | ✏️ passed | 1 changed, 3 unchanged    |
+|                   |           | 1/1 locators healed       |
+|                   |           | 2 touching files changed  |
+| Create a project  | ✅ passed | 5 unchanged               |
+| Export a report   | ✅ passed | 4 unchanged               |
+| Billing settings  | ✅ passed | 6 unchanged               |
+
+<span class="c">#### Heals — Invite a teammate</span>
+- ✅ step 4 "Send the invite."
+  button "Send invite" → button "Send invitation"
+  (heuristic, 95%)</pre>
+  </div>
+</section>
+
+<section id="integrate">
+  <h2>Plug in as deep as you like.</h2>
+  <p class="sub">Nothing is required. Each level gives the engine more visibility into what changed.</p>
+  <table>
+    <tr><th>Level</th><th>You add</th><th>You get</th></tr>
+    <tr><td><span class="pill">0</span> Nothing</td><td>Flow files and a URL</td><td>Run, diff, heal, render against any site you can reach.</td></tr>
+    <tr><td><span class="pill">1</span> Repo</td><td><code>demos/</code> with <code>touches:</code> globs, the GitHub Action</td><td><code>build --since</code> knows which flows a PR affects. Heals come back as a reviewable diff.</td></tr>
+    <tr><td><span class="pill">2</span> Anchors</td><td><code>data-demo="…"</code> on a few stable elements</td><td>Locators that survive copy changes. <code>demo-engine anchors</code> fails CI when one disappears.</td></tr>
+    <tr><td><span class="pill">3</span> Tests</td><td><code>import { test } from "@demo-engine/playwright"</code></td><td>Your e2e suite records narrated demos as a by-product.</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>Who it is for</h2>
+  <div class="grid">
+    <div class="card"><h3>Product marketing</h3><p>Launch videos that match the product on launch day, and still match a quarter later.</p></div>
+    <div class="card"><h3>Docs and support</h3><p>Help-center walkthroughs regenerated with every release. Zero re-recording.</p></div>
+    <div class="card"><h3>Engineering</h3><p>A demo that breaks is a regression you caught before a customer did.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>Get started in two minutes</h2>
+<pre>npm i -D demo-engine
+npx playwright install chromium
+npx demo-engine init --base-url http://localhost:3000
+npx demo-engine build demos</pre>
+  <p class="sub" style="margin-top:16px">Works with no keys. Add <code>ANTHROPIC_API_KEY</code> for polished scripts and smarter heals, <code>ELEVENLABS_API_KEY</code> for a production voice.</p>
+  <div class="cta"><a class="btn" href="https://github.com/niqbal/demo-engine">Read the docs on GitHub</a></div>
+</section>
+
+<footer>demo-engine is Apache-2.0 open source. Built with Playwright and Remotion. <a href="https://github.com/niqbal/demo-engine/issues">Issues</a> · <a href="https://www.linkedin.com/in/iqbalasad/">Nawab Iqbal</a></footer>
+</div>
+</body>
+</html>
