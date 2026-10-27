@@ -24,7 +24,7 @@ export const StepScene: React.FC<StepSceneProps> = ({ scene, video, cursorFrom }
   const typing = scene.typing ?? [];
   const typingFrames = typing.length ? Math.round(fps * (0.5 + typing.length * 0.11)) : 0;
   const swapStart = clickAt + 3 + typingFrames;
-  const swapEnd = swapStart + Math.round(fps * 0.3);
+  const swapEnd = swapStart + 2; // hard cut: screen recordings do not cross-fade
   // Hover state shows once the cursor arrives, before the click.
   const hoverO = scene.hover ? interpolate(frame, [moveFrames - 6, moveFrames - 1], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) : 0;
   const typingIndex = typing.length ? Math.min(typing.length - 1, Math.floor(interpolate(frame, [clickAt + 2, clickAt + 2 + typingFrames], [0, typing.length], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }))) : -1;

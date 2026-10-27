@@ -4,3 +4,4 @@ demos: demos
 brand:
   accent: "#E11D48"
   title: TodoMVC
+tts: kokoro
