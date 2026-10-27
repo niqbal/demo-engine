@@ -7,6 +7,8 @@ export interface TTS {
   name: string;
   /** Returns a 16-bit PCM WAV buffer. */
   synthesize(text: string, voice?: string): Promise<Buffer>;
+  /** Optional batch path for providers with expensive startup (one process, many lines). */
+  synthesizeMany?(texts: string[], voice?: string): Promise<Buffer[]>;
 }
 
 export type TTSPreference = "auto" | "openai" | "elevenlabs" | "kokoro" | "say" | "silent";
@@ -90,42 +92,62 @@ export function kokoroPython(): string | undefined {
 }
 
 const KOKORO_SCRIPT = `
-import sys, json, warnings
+import sys, json, warnings, os, platform
 warnings.filterwarnings("ignore")
+# The espeak-ng wheel bundled with misaki carries a build-time data path that is wrong on some
+# platforms (notably Intel macOS). Prefer an explicit or Homebrew espeak-ng when present.
+lib = os.environ.get("ESPEAK_NG_LIBRARY")
+data = os.environ.get("ESPEAK_DATA_PATH")
+if platform.system() == "Darwin" and not lib:
+    for prefix in ("/opt/homebrew", "/usr/local"):
+        if os.path.exists(prefix + "/lib/libespeak-ng.dylib") and os.path.exists(prefix + "/share/espeak-ng-data/phontab"):
+            lib, data = prefix + "/lib/libespeak-ng.dylib", data or prefix + "/share/espeak-ng-data"
+            break
+if lib or data:
+    try:
+        import espeakng_loader
+        if lib: espeakng_loader.get_library_path = lambda: lib
+        if data: espeakng_loader.get_data_path = lambda: data
+    except Exception:
+        pass
 import numpy as np, soundfile as sf
 from kokoro import KPipeline
 req = json.load(sys.stdin)
 p = KPipeline(lang_code=req.get("lang", "a"), repo_id="hexgrad/Kokoro-82M")
-chunks = [a for _, _, a in p(req["text"], voice=req.get("voice") or "af_heart", speed=req.get("speed", 1.0))]
-audio = np.concatenate(chunks) if chunks else np.zeros(2400, dtype=np.float32)
-sf.write(req["out"], audio, 24000, subtype="PCM_16")
+for item in req["items"]:
+    chunks = [a for _, _, a in p(item["text"], voice=req.get("voice") or "af_heart", speed=req.get("speed", 1.0))]
+    audio = np.concatenate(chunks) if chunks else np.zeros(2400, dtype=np.float32)
+    sf.write(item["out"], audio, 24000, subtype="PCM_16")
 print("ok")
 `;
 
 /**
  * Kokoro-82M: open-weights neural TTS that runs locally (Apache-2.0).
  * Needs: pip install kokoro soundfile   (first run downloads ~330MB of weights)
+ * Intel macOS also needs: brew install espeak-ng  (torch 2.2 + a broken bundled espeak path)
  */
 function kokoro(): TTS {
+  async function run(texts: string[], voice?: string): Promise<Buffer[]> {
+    const py = kokoroPython();
+    if (!py) throw new Error("kokoro not installed: pip install kokoro soundfile (or set DEMO_ENGINE_KOKORO_PYTHON)");
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "demo-engine-"));
+    const items = texts.map((text, i) => ({ text, out: path.join(dir, `${i}.wav`) }));
+    await new Promise<void>((resolve, reject) => {
+      const p = spawn(py, ["-c", KOKORO_SCRIPT], { stdio: ["pipe", "pipe", "pipe"] });
+      let err = "";
+      p.stderr.on("data", (d) => (err += d.toString()));
+      p.on("exit", (c) => (c === 0 ? resolve() : reject(new Error(`kokoro exited ${c}: ${err.split("\n").filter((l) => l.trim()).slice(-3).join(" | ")}`))));
+      p.on("error", reject);
+      p.stdin.end(JSON.stringify({ items, voice: voice ?? process.env.KOKORO_VOICE ?? "af_heart", speed: Number(process.env.KOKORO_SPEED ?? 1.0) }));
+    });
+    const bufs = await Promise.all(items.map((it) => fs.readFile(it.out)));
+    await fs.rm(dir, { recursive: true, force: true });
+    return bufs;
+  }
   return {
     name: "kokoro",
-    async synthesize(text, voice) {
-      const py = kokoroPython();
-      if (!py) throw new Error("kokoro not installed: pip install kokoro soundfile (or set DEMO_ENGINE_KOKORO_PYTHON)");
-      const dir = await fs.mkdtemp(path.join(os.tmpdir(), "demo-engine-"));
-      const out = path.join(dir, "out.wav");
-      await new Promise<void>((resolve, reject) => {
-        const p = spawn(py, ["-c", KOKORO_SCRIPT], { stdio: ["pipe", "pipe", "pipe"] });
-        let err = "";
-        p.stderr.on("data", (d) => (err += d.toString()));
-        p.on("exit", (c) => (c === 0 ? resolve() : reject(new Error(`kokoro exited ${c}: ${err.split("\n").filter((l) => l.trim()).slice(-3).join(" | ")}`))));
-        p.on("error", reject);
-        p.stdin.end(JSON.stringify({ text, voice: voice ?? process.env.KOKORO_VOICE ?? "af_heart", out, speed: Number(process.env.KOKORO_SPEED ?? 1.0) }));
-      });
-      const buf = await fs.readFile(out);
-      await fs.rm(dir, { recursive: true, force: true });
-      return buf;
-    }
+    synthesize: async (text, voice) => (await run([text], voice))[0],
+    synthesizeMany: run
   };
 }
 

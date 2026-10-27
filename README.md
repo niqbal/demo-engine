@@ -157,7 +157,7 @@ Targets are flow files, directories of `*.flow.yaml`, or run directories recorde
 | | options | pick with |
 |---|---|---|
 | LLM (script polish, heal) | Anthropic, OpenAI, none | `llm:` in config or `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` |
-| TTS | ElevenLabs, OpenAI, Kokoro (local neural), macOS `say`, silent | `tts:` in config or the matching key. Kokoro: `pip install kokoro soundfile`, optional `KOKORO_VOICE` (default `af_heart`) |
+| TTS | ElevenLabs, OpenAI, Kokoro (local neural), macOS `say`, silent | `tts:` in config or the matching key. Kokoro: `pip install kokoro soundfile` (Intel Mac: also `brew install espeak-ng` and `pip install "torch==2.2.2" "numpy<2" "transformers<4.50"`), `DEMO_ENGINE_KOKORO_PYTHON` to pick an interpreter, `KOKORO_VOICE` (default `af_heart`) |
 | Render | Remotion (bundled Chrome Headless Shell) | nothing to configure |
 
 Remotion is free for individuals and teams of up to three; larger companies need a [Remotion company license](https://www.remotion.dev/docs/license).

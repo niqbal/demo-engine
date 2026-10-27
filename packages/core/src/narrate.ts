@@ -86,37 +86,45 @@ export async function narrateRun(flow: Flow, run: RunResult, opts: NarrateOption
     }
   }
 
-  // Audio (one TTS call per changed line, cached by text+voice+provider).
+  // Audio: cached per text+voice+provider. Uncached lines go to the provider in one batch when it supports it.
   const audioDir = opts.store.audioCacheDir();
   await ensureDir(audioDir);
-  const steps: NarrationStep[] = [];
   let tts = opts.tts;
+  const keyFor = (text: string) => sha256(JSON.stringify({ tts: tts.name, voice: opts.voice ?? "", text })).slice(0, 24);
+  const pending: { index: number; text: string }[] = [];
+  for (let i = 0; i < run.steps.length; i++) {
+    const key = keyFor(lines[i]);
+    if (!((await exists(path.join(audioDir, `${key}.wav`))) && (await exists(path.join(audioDir, `${key}.json`))))) pending.push({ index: i, text: lines[i] });
+  }
+  const synthesizeAll = async (provider: TTS): Promise<Buffer[]> => {
+    if (provider.synthesizeMany && pending.length > 1) return provider.synthesizeMany(pending.map((p) => p.text), opts.voice);
+    const out: Buffer[] = [];
+    for (const p of pending) out.push(await provider.synthesize(p.text, opts.voice));
+    return out;
+  };
+  if (pending.length) {
+    log.info(`tts: ${pending.length} line${pending.length === 1 ? "" : "s"} with ${tts.name}`);
+    let bufs: Buffer[];
+    try {
+      bufs = await synthesizeAll(tts);
+    } catch (e) {
+      if (!opts.fallbackTTS || tts === opts.fallbackTTS) throw e;
+      log.warn(`tts: ${tts.name} failed (${(e as Error).message.split("\n")[0]}); falling back to ${opts.fallbackTTS.name}`);
+      tts = opts.fallbackTTS;
+      bufs = await synthesizeAll(tts);
+    }
+    for (let j = 0; j < pending.length; j++) {
+      const key = keyFor(pending[j].text);
+      await fs.writeFile(path.join(audioDir, `${key}.wav`), bufs[j]);
+      await writeJson(path.join(audioDir, `${key}.json`), { durationMs: wavDurationMs(bufs[j]), text: pending[j].text, voice: opts.voice ?? null, tts: tts.name });
+    }
+  }
+  const steps: NarrationStep[] = [];
   for (let i = 0; i < run.steps.length; i++) {
     const text = lines[i];
-    const key = sha256(JSON.stringify({ tts: tts.name, voice: opts.voice ?? "", text })).slice(0, 24);
-    const wav = path.join(audioDir, `${key}.wav`);
-    const meta = path.join(audioDir, `${key}.json`);
-    let durationMs: number;
-    let cached = true;
-    if ((await exists(wav)) && (await exists(meta))) {
-      durationMs = (await readJson<{ durationMs: number }>(meta)).durationMs;
-    } else {
-      cached = false;
-      log.info(`tts: step ${i + 1} (${tts.name})`);
-      let buf: Buffer;
-      try {
-        buf = await tts.synthesize(text, opts.voice);
-      } catch (e) {
-        if (!opts.fallbackTTS || tts === opts.fallbackTTS) throw e;
-        log.warn(`tts: ${tts.name} failed (${(e as Error).message.split("\n")[0]}); falling back to ${opts.fallbackTTS.name}`);
-        tts = opts.fallbackTTS;
-        buf = await tts.synthesize(text, opts.voice);
-      }
-      durationMs = wavDurationMs(buf);
-      await fs.writeFile(wav, buf);
-      await writeJson(meta, { durationMs, text, voice: opts.voice ?? null, tts: opts.tts.name });
-    }
-    steps.push({ index: i, say: says[i], text, audio: path.resolve(wav), durationMs, cached });
+    const key = keyFor(text);
+    const meta = await readJson<{ durationMs: number }>(path.join(audioDir, `${key}.json`));
+    steps.push({ index: i, say: says[i], text, audio: path.resolve(path.join(audioDir, `${key}.wav`)), durationMs: meta.durationMs, cached: !pending.some((p) => p.index === i) });
   }
   const narration: Narration = { version: 1, llm: llmName, tts: tts.name, voice: opts.voice, steps };
   await writeJson(path.join(run.runDir, "narration.json"), narration);
