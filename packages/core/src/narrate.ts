@@ -8,6 +8,7 @@ import type { Store } from "./store.js";
 import type { TTS } from "./tts.js";
 import { wavDurationMs } from "./tts.js";
 import { ensureDir, exists, readJson, sha256, silentLogger, writeJson, type Logger } from "./util.js";
+import type { Audience } from "./audience.js";
 
 export interface NarrationStep {
   index: number;
@@ -37,16 +38,30 @@ export interface NarrateOptions {
   logger?: Logger;
   /** Skip LLM polishing and read `say` verbatim. */
   verbatim?: boolean;
+  /** The prospect this narration is for. The script writer argues their case; the voice may follow their language. */
+  audience?: Audience;
 }
 
 const SYSTEM = `You write voice-over for short product walkthrough videos.
 Rewrite each step's note into one or two natural spoken sentences (max 30 words per step).
 Keep product terms exactly as given in the glossary. Keep the order. Do not add steps, greetings or sign-offs.
+When an audience is given, speak to that company: use their name where the note does, and connect the step to their situation when it is natural, never forced.
 Return JSON: {"lines": ["...", "..."]} with exactly one string per input step.`;
 
-export async function polishScript(llm: LLM, flow: Flow, says: string[], glossary?: string): Promise<string[]> {
+export function audienceBrief(a?: Audience): string {
+  if (!a || a.id === "default") return "";
+  const parts = [`Company: ${a.company}`];
+  if (a.industry) parts.push(`Industry: ${a.industry}`);
+  if (a.contact?.first || a.contact?.title) parts.push(`Viewer: ${[a.contact.first, a.contact.last].filter(Boolean).join(" ")}${a.contact.title ? `, ${a.contact.title}` : ""}`);
+  if (a.pitch) parts.push(`Context: ${a.pitch}`);
+  return parts.join("\n");
+}
+
+export async function polishScript(llm: LLM, flow: Flow, says: string[], glossary?: string, audience?: Audience): Promise<string[]> {
+  const brief = audienceBrief(audience);
   const user = [
     `Product walkthrough: ${flow.name}${flow.description ? ` — ${flow.description}` : ""}`,
+    brief ? `Audience (who is watching):\n${brief}` : "",
     glossary ? `Glossary:\n${glossary}` : "",
     `Steps:\n${says.map((s, i) => `${i + 1}. ${s}`).join("\n")}`
   ]
@@ -69,15 +84,15 @@ export async function narrateRun(flow: Flow, run: RunResult, opts: NarrateOption
   if (opts.llm && !opts.verbatim) {
     const scriptDir = path.join(opts.store.out, "cache", "script");
     await ensureDir(scriptDir);
-    const key = sha256(JSON.stringify({ llm: opts.llm.name, says, glossary: opts.glossary ?? "", name: flow.name })).slice(0, 24);
+    const key = sha256(JSON.stringify({ llm: opts.llm.name, says, glossary: opts.glossary ?? "", name: flow.name, audience: audienceBrief(opts.audience) })).slice(0, 24);
     const cachePath = path.join(scriptDir, `${key}.json`);
     if (await exists(cachePath)) {
       lines = (await readJson<{ lines: string[] }>(cachePath)).lines;
       log.debug("script: cache hit");
     } else {
-      log.info(`script: polishing ${says.length} lines with ${opts.llm.name}`);
+      log.info(`script: polishing ${says.length} lines with ${opts.llm.name}${opts.audience && opts.audience.id !== "default" ? ` for ${opts.audience.company}` : ""}`);
       try {
-        lines = await polishScript(opts.llm, flow, says, opts.glossary);
+        lines = await polishScript(opts.llm, flow, says, opts.glossary, opts.audience);
         await writeJson(cachePath, { lines });
       } catch (e) {
         log.warn(`script: ${(e as Error).message}; using notes verbatim`);
@@ -103,7 +118,8 @@ export async function narrateRun(flow: Flow, run: RunResult, opts: NarrateOption
     return out;
   };
   if (pending.length) {
-    log.info(`tts: ${pending.length} line${pending.length === 1 ? "" : "s"} with ${tts.name}`);
+    const cachedN = run.steps.length - pending.length;
+    log.info(`tts: ${pending.length} line${pending.length === 1 ? "" : "s"} with ${tts.name}${cachedN ? ` (${cachedN} cached)` : ""}`);
     let bufs: Buffer[];
     try {
       bufs = await synthesizeAll(tts);

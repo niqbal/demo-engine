@@ -97,6 +97,31 @@ export const AuthSchema = z
   })
   .strict();
 
+/**
+ * A DOM rewrite applied before every screenshot of a personalized run (Layer 2 personalization:
+ * the app itself is not seeded, the page is repainted). Values accept `{{audience.*}}`.
+ */
+export const PersonalizeRuleSchema = z
+  .object({
+    css: z.string().min(1),
+    text: z.string().optional(),
+    src: z.string().optional(),
+    html: z.string().optional(),
+    style: z.string().optional(),
+    attr: z.record(z.string(), z.string()).optional(),
+    /** Rewrite every match (default) or only the first. */
+    all: z.boolean().default(true)
+  })
+  .strict();
+export type PersonalizeRule = z.infer<typeof PersonalizeRuleSchema>;
+
+export const EndCardSchema = z
+  .object({
+    text: z.string().optional(),
+    url: z.string().optional()
+  })
+  .strict();
+
 export const FlowSchema = z
   .object({
     name: z.string().min(1),
@@ -110,6 +135,12 @@ export const FlowSchema = z
     touches: z.array(z.string()).optional(),
     setup: z.string().optional(),
     mask: z.array(z.string()).optional(),
+    /** Default audience values. CI, diff and heal run with these; `--audience` overrides them per prospect. */
+    defaults: z.record(z.string(), z.unknown()).optional(),
+    /** DOM rewrites applied before each screenshot (see PersonalizeRuleSchema). */
+    personalize: z.array(PersonalizeRuleSchema).optional(),
+    /** Closing card. Shown when set, or when the audience names a rep. */
+    end: EndCardSchema.optional(),
     steps: z.array(StepSchema).min(1)
   })
   .strict();
@@ -131,10 +162,15 @@ export const ConfigSchema = z
         accent: z.string().default("#4F46E5"),
         background: z.string().default("#0B0F19"),
         title: z.string().optional(),
-        logo: z.string().optional()
+        logo: z.string().optional(),
+        /** Default end-card text, e.g. "Book a walkthrough". Audience `rep` fills in the person. */
+        cta: z.string().optional(),
+        url: z.string().optional()
       })
       .partial()
-      .optional()
+      .optional(),
+    /** Where `--audiences` looks when given a bare name; default `<demos>/audiences`. */
+    audiences: z.string().optional()
   })
   .strict();
 export type Config = z.infer<typeof ConfigSchema>;

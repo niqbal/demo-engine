@@ -41,6 +41,9 @@ inputs:
   fail-on-broken:
     description: "Fail the job when a flow is broken"
     default: "true"
+  audiences:
+    description: "Audiences to render personalized videos for: names, files or a CSV (space separated); `all` for every file in the audiences dir"
+    default: ""
   upload-artifacts:
     description: "Upload renders and reports as a workflow artifact"
     default: "true"
@@ -77,6 +80,7 @@ runs:
         [ "${{ inputs.bless }}" = "true" ] && args+=(--bless)
         [ "${{ inputs.render }}" = "false" ] && args+=(--no-render)
         [ "${{ inputs['fail-on-broken'] }}" = "false" ] && args+=(--no-fail-on-broken)
+        if [ "${{ inputs.audiences }}" = "all" ]; then args+=(--audiences); elif [ -n "${{ inputs.audiences }}" ]; then args+=(--audiences ${{ inputs.audiences }}); fi
         demo-engine "${args[@]}"
         code=$?
         echo "report=${{ inputs.out }}/report.md" >> "$GITHUB_OUTPUT"

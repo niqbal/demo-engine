@@ -15,6 +15,8 @@ export interface RenderOptions {
   poster?: string;
   log?: (msg: string) => void;
   onProgress?: (pct: number) => void;
+  /** Base directory for relative logo paths. */
+  cwd?: string;
 }
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -25,8 +27,29 @@ async function dataUrl(file: string, mime: string): Promise<string> {
   return `data:${mime};base64,${buf.toString("base64")}`;
 }
 
-/** Inline every screenshot and audio file so the bundle needs no public dir. */
-export async function manifestToProps(m: Manifest): Promise<VideoProps> {
+const IMAGE_MIME: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".svg": "image/svg+xml", ".webp": "image/webp", ".gif": "image/gif" };
+
+/** Inline an image given as a data URL, an http(s) URL or a local path. Returns undefined when it cannot be loaded. */
+export async function imageDataUrl(src: string | undefined, cwd = process.cwd(), log?: (m: string) => void): Promise<string | undefined> {
+  if (!src) return undefined;
+  if (src.startsWith("data:")) return src;
+  try {
+    if (/^https?:\/\//i.test(src)) {
+      const res = await fetch(src, { signal: AbortSignal.timeout(10_000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const mime = res.headers.get("content-type")?.split(";")[0] || IMAGE_MIME[path.extname(new URL(src).pathname).toLowerCase()] || "image/png";
+      return `data:${mime};base64,${Buffer.from(await res.arrayBuffer()).toString("base64")}`;
+    }
+    const file = path.resolve(cwd, src);
+    return await dataUrl(file, IMAGE_MIME[path.extname(file).toLowerCase()] ?? "image/png");
+  } catch (e) {
+    log?.(`image ${src} could not be loaded (${(e as Error).message}); skipping`);
+    return undefined;
+  }
+}
+
+/** Inline every screenshot, audio file and logo so the bundle needs no public dir. */
+export async function manifestToProps(m: Manifest, cwd = process.cwd(), log?: (m: string) => void): Promise<VideoProps> {
   const scenes = [];
   for (const s of m.scenes) {
     scenes.push({
@@ -54,34 +77,52 @@ export async function manifestToProps(m: Manifest): Promise<VideoProps> {
     height: m.height,
     scale: m.scale,
     captions: m.captions,
-    brand: m.brand,
+    brand: { ...m.brand, logo: await imageDataUrl(m.brand.logo, cwd, log) },
+    audience: m.audience
+      ? {
+          ...m.audience,
+          logo: await imageDataUrl(m.audience.logo, cwd, log),
+          rep: m.audience.rep ? { ...m.audience.rep, photo: await imageDataUrl(m.audience.rep.photo, cwd, log) } : undefined
+        }
+      : undefined,
+    end: m.end,
     scenes,
     totalFrames: m.totalFrames
   };
+}
+
+/** Cache key for the bundle: every source file of the composition with its mtime. */
+async function compositionStamp(): Promise<string> {
+  const dir = path.dirname(ENTRY);
+  const names = (await fs.readdir(dir)).filter((n) => /\.(tsx?|css)$/.test(n)).sort();
+  const parts: string[] = [];
+  for (const n of names) parts.push(`${n}:${(await fs.stat(path.join(dir, n))).mtimeMs}`);
+  return ENTRY + "\n" + parts.join("\n");
 }
 
 export async function ensureBundle(bundleDirIn: string, rebundle = false, log?: (m: string) => void): Promise<string> {
   const bundleDir = path.resolve(bundleDirIn);
   const marker = path.join(bundleDir, "index.html");
   const stamp = path.join(bundleDir, ".demo-engine-entry");
+  const want = await compositionStamp();
   let fresh = false;
   try {
     await fs.access(marker);
-    fresh = (await fs.readFile(stamp, "utf8")) === ENTRY + "\n" + (await fs.stat(ENTRY)).mtimeMs;
+    fresh = (await fs.readFile(stamp, "utf8")) === want;
   } catch {
     fresh = false;
   }
   if (fresh && !rebundle) return bundleDir;
-  log?.("bundling Remotion composition (first run only)");
+  log?.("bundling Remotion composition (first run, or the composition changed)");
   await fs.rm(bundleDir, { recursive: true, force: true });
   const out = await bundle({ entryPoint: ENTRY, outDir: bundleDir });
-  await fs.writeFile(stamp, ENTRY + "\n" + (await fs.stat(ENTRY)).mtimeMs, "utf8");
+  await fs.writeFile(stamp, want, "utf8");
   return out;
 }
 
 export async function renderVideo(manifest: Manifest, opts: RenderOptions): Promise<{ outFile: string; poster?: string }> {
   const serveUrl = await ensureBundle(opts.bundleDir, opts.rebundle, opts.log);
-  const inputProps = (await manifestToProps(manifest)) as unknown as Record<string, unknown>;
+  const inputProps = (await manifestToProps(manifest, opts.cwd, opts.log)) as unknown as Record<string, unknown>;
   const composition = await selectComposition({ serveUrl, id: "Demo", inputProps });
   const outFile = path.resolve(opts.outFile);
   await fs.mkdir(path.dirname(outFile), { recursive: true });

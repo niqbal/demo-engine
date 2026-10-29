@@ -4,21 +4,32 @@ url: ${BASE_URL}/
 touches:
   - "src/todo/**"
   - "src/components/TodoList*"
+# Default audience: what CI, diff and heal run with. `--audience` overrides these per prospect.
+defaults:
+  company: your team
+  workspace: todos
+  task: Write the launch post
+# Layer 2: repaint the page for the audience before every screenshot (the app is not seeded).
+personalize:
+  - { css: "header.header h1", text: "{{audience.workspace}}" }
+end:
+  text: Try it with your own data.
+  url: https://niqbal.github.io/demo-engine/
 steps:
   - say: Type a task and press Enter to add it to the list.
     fill: { target: { placeholder: "What needs to be done?" }, value: "Buy oat milk" }
     press: Enter
     expect: { text: "Buy oat milk" }
-  - say: Add a couple more tasks the same way.
-    type: { target: { placeholder: "What needs to be done?" }, value: "Write the launch post" }
+  - say: Add the next thing {{audience.company}} needs done, the same way.
+    type: { target: { placeholder: "What needs to be done?" }, value: "{{audience.task}}" }
     press: Enter
-    expect: { text: "Write the launch post" }
+    expect: { text: "{{audience.task}}" }
   - say: Check a task off when it's done.
     click: { role: checkbox, name: "Toggle Todo", nth: 0 }
     zoom: { scale: 1.5 }
   - say: Filter the list to see only what's still active.
     click: { role: link, name: "Active" }
-    expect: { text: "Write the launch post" }
+    expect: { text: "{{audience.task}}" }
   - say: Switch back to All and clear completed tasks in one click.
     click: { role: link, name: "All" }
   - say: Clear completed removes everything you've finished.

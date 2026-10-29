@@ -1,0 +1,9 @@
+company: Globex
+workspace: globex
+industry: Fintech
+task: Ship the KYC checklist
+logo: demos/audiences/logos/globex.svg
+accent: "#2563EB"
+contact: { first: Hank, title: VP Compliance }
+rep: { name: Asad Iqbal, title: "Founder, demo-engine", calendar: https://cal.com/demo-engine/15min }
+pitch: Compliance reviews slip between email and Jira; wants one place to track checklist items per client.

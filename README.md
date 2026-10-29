@@ -94,6 +94,54 @@ test("Invite a teammate", async ({ page, demo }) => {
 });
 ```
 
+## One flow, many prospects
+
+A flow is a template. An **audience** is one prospect or customer: company, logo, industry, the person watching, the rep presenting, the sample data they should see. `flow × audience` is a personalized run and a personalized video, and every one of them is regenerated when the product changes.
+
+```yaml
+# demos/onboarding.flow.yaml
+name: Onboarding
+url: ${BASE_URL}/
+defaults: { company: your team, task: Write the launch post }   # what CI, diff and heal run with
+setup: npm run seed:demo -- --tenant $AUDIENCE_ID                # Layer 1: real data in the app
+personalize:                                                     # Layer 2: repaint what cannot be seeded
+  - { css: "header h1", text: "{{audience.company}}" }
+end: { text: Try it with your own data., url: https://example.com/book }
+steps:
+  - say: Add the next thing {{audience.company}} needs done.   # Layer 3: narration and cards
+    type: { target: { placeholder: "What needs to be done?" }, value: "{{audience.task}}" }
+    expect: { text: "{{audience.task}}" }
+```
+
+```yaml
+# demos/audiences/acme.yaml  (or one CSV with dotted headers: contact.first, rep.name)
+company: Acme Logistics
+industry: Logistics
+task: Confirm Q4 carrier contracts
+logo: demos/audiences/logos/acme.svg
+contact: { first: Priya, title: Head of Operations }
+rep: { name: Asad Iqbal, title: Founder, calendar: https://cal.com/demo-engine/15min }
+pitch: Ops team of 40 tracks carrier tasks in spreadsheets.
+```
+
+```bash
+demo-engine build demos --audience acme                 # one prospect
+demo-engine build demos --audiences acme globex initech # several
+demo-engine build demos --audiences demos/prospects.csv # from a CRM export
+demo-engine build demos --audiences                     # everything in demos/audiences/
+demo-engine audiences                                   # which steps change per audience, and why
+```
+
+How it stays cheap and correct:
+
+- **Shared capture.** CI, diff and heal run once, on `defaults:`. A flow with no `{{audience.*}}` in its steps and no `personalize:` block reuses the default run's frames for every audience; only narration and cards change. Otherwise the browser runs per audience and `run.json` marks which steps are personalized.
+- **Cached narration.** Lines are cached by text and voice, so five hundred prospects re-synthesize only the sentences that name them. With an LLM key the script is polished per audience using `industry`, `contact` and `pitch`.
+- **Skipped when unchanged.** `renders/<flow>/<audience>/audience.json` stamps what was rendered. When the product and the audience are unchanged, the audience is skipped outright.
+- **Heals carry over.** A locator healed on the default run is applied to every audience in the same build.
+- **Title and end cards.** Vendor logo × prospect logo, "Made for Acme · Priya", the rep's card and calendar link. An audience `accent` or `voice` overrides the brand's.
+
+Output: `renders/<flow>/<audience>/<flow>.mp4` next to the default `renders/<flow>/<flow>.mp4`. The flow's `setup:` sees `AUDIENCE_ID` and `AUDIENCE_JSON`.
+
 ## CI
 
 `demo-engine init` writes `.github/workflows/demos.yml`. The composite action installs the CLI and Chromium, runs `build`, uploads renders as an artifact, and posts (or updates) one PR comment:
@@ -126,6 +174,9 @@ Report on a PR that renamed a button:
 | `setup` | Shell command run before the flow (seed a demo tenant). `BASE_URL` is in the env. |
 | `mask` | CSS selectors ignored by the visual diff (clocks, avatars). |
 | `viewport`, `voice` | Default 1440×900 at 2×. Voice is provider-specific. |
+| `defaults` | Default audience values. Any string in the flow may use `{{audience.field}}` or `{{audience.field \| "fallback"}}`. |
+| `personalize` | DOM rewrites applied before every screenshot: `{ css, text?, src?, html?, style?, attr?, all? }`. |
+| `end` | Closing card: `text`, `url`. Shown when set, when `brand.cta` is set, or when the audience names a `rep`. |
 
 Each **step** has `say` plus at most one action: `goto`, `click`, `dblclick`, `hover`, `fill`, `type`, `select`, `check`, `press`, `scroll`, `wait`. Optional: `expect` (`text`, `visible`, `hidden`, `url`), `zoom`, `mask`, `pause`, `highlight`. `fill`/`type` accept a `press` to hit Enter afterwards.
 
@@ -136,8 +187,9 @@ Each **step** has `say` plus at most one action: `goto`, `click`, `dblclick`, `h
 | command | what it does |
 |---|---|
 | `init` | Scaffold `demos/`, config and workflow. |
-| `build [targets]` | The pipeline. `--since <ref>`, `--only-affected`, `--no-heal`, `--write-heals`, `--bless`, `--no-render`, `--no-narrate`, `--verbatim`, `--force`, `--report <dir>`. |
-| `run` / `diff` / `heal` / `narrate` / `render` / `bless` | Each stage on its own. |
+| `build [targets]` | The pipeline. `--since <ref>`, `--only-affected`, `--no-heal`, `--write-heals`, `--bless`, `--no-render`, `--no-narrate`, `--verbatim`, `--force`, `--report <dir>`, `--audience <name>`, `--audiences [names\|files\|csv...]`. |
+| `run` / `diff` / `heal` / `narrate` / `render` / `bless` | Each stage on its own. `run`, `narrate` and `render` take `--audience`. |
+| `audiences [flow]` | List audiences and show which steps of a flow change per audience. |
 | `changed --since <ref>` | Which flows a change affects, by `touches`. |
 | `anchors --src <dir>` | Anchors referenced by flows but missing from the source. |
 | `doctor` | Browser, providers, keys. |

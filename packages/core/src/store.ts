@@ -31,6 +31,24 @@ export class Store {
     return path.join(this.out, "renders", slug);
   }
 
+  /** Per-audience capture of a run: `runs/<slug>/<runId>/audiences/<audienceId>/`. Pruned with its run. */
+  audienceRunDir(slug: string, runId: string, audienceId: string): string {
+    return path.join(this.runDir(slug, runId), "audiences", audienceId);
+  }
+
+  /** Per-audience render: `renders/<slug>/<audienceId>/`. */
+  audienceRendersDir(slug: string, audienceId: string): string {
+    return path.join(this.rendersDir(slug), audienceId);
+  }
+
+  async loadAudienceRun(slug: string, runId: string, audienceId: string): Promise<RunResult | undefined> {
+    const dir = path.resolve(this.audienceRunDir(slug, runId, audienceId));
+    if (!(await exists(path.join(dir, "run.json")))) return undefined;
+    const run = await readJson<RunResult>(path.join(dir, "run.json"));
+    run.runDir = dir;
+    return run;
+  }
+
   reportsDir(slug: string): string {
     return path.join(this.out, "reports", slug);
   }

@@ -4,28 +4,35 @@ import { fileURLToPath } from "node:url";
 import type { Command } from "commander";
 import {
   affectedFlows,
+  applyHeals,
   buildManifest,
   changedFiles,
   compareRuns,
   diffToMarkdown,
+  ensureDir,
   exists,
   headSha,
   healFlow,
   isGitRepo,
   kokoroPython,
   narrateRun,
+  personalizeFlow,
+  probeAudience,
   readJson,
   runFlow,
+  sha256,
   stringifyFlow,
   writeJson,
   writeManifest,
+  type Audience,
   type DiffReport,
   type Heal,
   type Narration,
+  type PersonalizedFlow,
   type RunResult
 } from "@demo-engine/core";
 import { renderVideo } from "@demo-engine/render";
-import { loadContext, rel, resolveTargets, type Ctx, type GlobalOpts, type Target } from "./context.js";
+import { audiencesDir, loadContext, rel, resolveAudiences, resolveTargets, type AudienceOpts, type Ctx, type GlobalOpts, type Target } from "./context.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATES = path.resolve(here, "..", "templates");
@@ -45,10 +52,25 @@ interface FlowReport {
   rendered: boolean;
   blessed?: string;
   changedFiles?: string[];
+  audiences?: AudienceReport[];
   durationMs: number;
 }
 
-interface BuildOpts extends GlobalOpts {
+interface AudienceReport {
+  id: string;
+  company: string;
+  status: "passed" | "failed" | "skipped";
+  reason?: string;
+  /** "shared" when the default run's frames were reused, "captured" when the browser ran for this audience. */
+  capture?: "shared" | "captured";
+  personalizedSteps?: number;
+  video?: string;
+  poster?: string;
+  rendered: boolean;
+  durationMs: number;
+}
+
+interface BuildOpts extends GlobalOpts, AudienceOpts {
   since?: string;
   onlyAffected?: boolean;
   heal?: boolean;
@@ -82,11 +104,18 @@ export function registerCommands(program: Command): void {
     .command("run [targets...]")
     .description("run flows in a headless browser and capture frames (no diff, no render)")
     .option("--headed", "show the browser")
-    .action(async (targets: string[], o: { headed?: boolean }) => {
+    .option("--audience <name|file>", "also capture the flow for this audience")
+    .option("--audiences [names|files|csv...]", "also capture for these audiences (no value: every file in the audiences dir)")
+    .action(async (targets: string[], o: { headed?: boolean } & AudienceOpts) => {
       const ctx = await loadContext(g());
+      const audiences = await resolveAudiences(ctx, o);
       for (const t of await resolveTargets(ctx, targets)) {
         const run = await doRun(ctx, t, { headed: o.headed });
         ctx.log.info(`${run.status}: ${rel(ctx, run.runDir)}`);
+        for (const a of audiences) {
+          const { run: ar, personalized } = await captureAudience(ctx, t, run, a, { headed: o.headed });
+          ctx.log.info(`${ar.status}: ${rel(ctx, ar.runDir)}  (${ar.sharedCapture ? "shared frames" : `${personalized.personalizedSteps.length} personalized step(s)`})`);
+        }
       }
     });
 
@@ -129,7 +158,7 @@ export function registerCommands(program: Command): void {
         }
         printHeals(r.heals);
         if (o.write && t.file && r.heals.some((h) => h.verified)) {
-          await fs.writeFile(t.file, stringifyFlow(r.flow), "utf8");
+          await fs.writeFile(t.file, stringifyFlow(applyHeals(t.template, r.heals)), "utf8");
           console.log(`wrote ${rel(ctx, t.file)}`);
         }
         unresolved ||= r.unresolved.length > 0;
@@ -141,12 +170,14 @@ export function registerCommands(program: Command): void {
     .command("narrate [targets...]")
     .description("generate voice-over for the latest run of each flow")
     .option("--verbatim", "skip LLM polishing; read step notes as written")
-    .action(async (targets: string[], o: { verbatim?: boolean }) => {
+    .option("--audience <name|file>", "narrate the latest audience capture instead (run with --audience first)")
+    .action(async (targets: string[], o: { verbatim?: boolean } & AudienceOpts) => {
       const ctx = await loadContext(g());
+      const [audience] = await resolveAudiences(ctx, o);
       for (const t of await resolveTargets(ctx, targets)) {
-        const run = await latest(ctx, t);
-        const n = await doNarrate(ctx, t, run, !!o.verbatim);
-        for (const s of n.steps) console.log(`${String(s.index + 1).padStart(2)}  ${(s.durationMs / 1000).toFixed(1)}s  ${s.text}`);
+        const { run, flow, personalized } = await latestFor(ctx, t, audience);
+        const n = await doNarrate(ctx, { ...t, flow }, run, !!o.verbatim, personalized?.audience);
+        for (const s of n.steps) console.log(`${String(s.index + 1).padStart(2)}  ${(s.durationMs / 1000).toFixed(1)}s  ${s.cached ? "·" : "♪"} ${s.text}`);
       }
     });
 
@@ -156,13 +187,47 @@ export function registerCommands(program: Command): void {
     .option("--fps <n>", "frames per second")
     .option("--no-captions", "hide captions")
     .option("--rebundle", "rebuild the Remotion bundle")
-    .action(async (targets: string[], o: { fps?: string; captions: boolean; rebundle?: boolean }) => {
+    .option("--audience <name|file>", "render the latest audience capture instead (run with --audience first)")
+    .action(async (targets: string[], o: { fps?: string; captions: boolean; rebundle?: boolean } & AudienceOpts) => {
       const ctx = await loadContext(g());
+      const [audience] = await resolveAudiences(ctx, o);
       for (const t of await resolveTargets(ctx, targets)) {
-        const run = await latest(ctx, t);
-        const narration = await loadNarration(run) ?? (await doNarrate(ctx, t, run, false));
-        const r = await doRender(ctx, t, run, narration, { fps: o.fps ? Number(o.fps) : undefined, captions: o.captions, rebundle: o.rebundle });
+        const { run, flow, personalized } = await latestFor(ctx, t, audience);
+        const narration = (await loadNarration(run)) ?? (await doNarrate(ctx, { ...t, flow }, run, false, personalized?.audience));
+        const r = await doRender(ctx, { ...t, flow }, run, narration, { fps: o.fps ? Number(o.fps) : undefined, captions: o.captions, rebundle: o.rebundle, audience: personalized?.audience });
         console.log(`wrote ${rel(ctx, r.outFile)}`);
+      }
+    });
+
+  program
+    .command("audiences")
+    .description("list the audiences a flow can be personalized for, and which steps change per audience")
+    .argument("[flow]", "flow file to analyse against (default: every flow in the demos dir)")
+    .option("--audiences [names|files|csv...]", "audiences to list (default: every file in the audiences dir)")
+    .action(async (flowArg: string | undefined, o: AudienceOpts) => {
+      const ctx = await loadContext(g());
+      const audiences = await resolveAudiences(ctx, { audiences: o.audiences ?? true }).catch((e: Error) => {
+        console.log(e.message);
+        return [] as Audience[];
+      });
+      console.log(`${audiences.length} audience${audiences.length === 1 ? "" : "s"} in ${rel(ctx, audiencesDir(ctx))}`);
+      for (const a of audiences) console.log(`  ${a.id.padEnd(18)} ${a.company}${a.industry ? ` · ${a.industry}` : ""}${a.contact?.first ? ` · ${a.contact.first}` : ""}${a.rep?.name ? ` · rep ${a.rep.name}` : ""}`);
+      for (const t of await resolveTargets(ctx, flowArg ? [flowArg] : [])) {
+        const p0 = personalizeFlow(t.template, probeAudience(t.template));
+        const vars = new Set(p0.vars);
+        const overlay = t.template.personalize?.length ?? 0;
+        console.log(`\n${t.flow.name}  (${t.file ? rel(ctx, t.file) : "recorded"})`);
+        console.log(`  variables: ${vars.size ? [...vars].map((v) => `audience.${v}`).join(", ") : "none"}`);
+        console.log(`  overlay rules: ${overlay}   state personalized (url/setup/auth): ${p0.personalizedState ? "yes" : "no"}`);
+        console.log(`  capture per audience: ${p0.needsCapture ? `yes, ${p0.personalizedSteps.length}/${t.flow.steps.length} steps differ` : "no (frames shared; only narration and cards change)"}`);
+        for (const a of audiences) {
+          try {
+            personalizeFlow(t.template, a);
+            console.log(`  ✓ ${a.id}`);
+          } catch (e) {
+            console.log(`  ✗ ${a.id}: ${(e as Error).message.split("\n")[0]}`);
+          }
+        }
       }
     });
 
@@ -267,6 +332,8 @@ export function registerCommands(program: Command): void {
     .option("--fps <n>", "frames per second")
     .option("--min-confidence <n>", "minimum heal confidence", "0.5")
     .option("--keep-runs <n>", "runs to keep per flow", "5")
+    .option("--audience <name|file>", "also build a personalized video for this audience")
+    .option("--audiences [names|files|csv...]", "also build for these audiences (no value: every file in the audiences dir)")
     .action(async (targets: string[], o: BuildOpts) => {
       const ctx = await loadContext({ ...g(), ...o });
       const code = await build(ctx, await resolveTargets(ctx, targets), o);
@@ -298,6 +365,128 @@ async function latest(ctx: Ctx, t: Target): Promise<RunResult> {
   return ctx.store.loadRun(slug, id);
 }
 
+/** Latest run, or the latest capture for an audience (captured now when missing). */
+async function latestFor(ctx: Ctx, t: Target, audience?: Audience): Promise<{ run: RunResult; flow: Target["flow"]; personalized?: PersonalizedFlow }> {
+  const run = await latest(ctx, t);
+  if (!audience) return { run, flow: t.flow };
+  const slug = ctx.store.slugFor(t.flow.name);
+  const personalized = personalizeFlow(t.template, audience);
+  const existing = await ctx.store.loadAudienceRun(slug, run.runId, audience.id);
+  if (existing) return { run: existing, flow: personalized.flow, personalized };
+  const captured = await captureAudience(ctx, t, run, audience, {});
+  return { run: captured.run, flow: personalized.flow, personalized };
+}
+
+/**
+ * Capture a flow for one audience, under the default run it belongs to.
+ * When nothing the browser sees depends on the audience, the default run's frames are reused.
+ */
+async function captureAudience(ctx: Ctx, t: Target, parent: RunResult, audience: Audience, o: { headed?: boolean }): Promise<{ run: RunResult; personalized: PersonalizedFlow }> {
+  const slug = ctx.store.slugFor(t.flow.name);
+  const personalized = personalizeFlow(t.template, audience);
+  const dir = path.resolve(ctx.store.audienceRunDir(slug, parent.runId, audience.id));
+  if (t.recordedRun && personalized.needsCapture) throw new Error(`${t.flow.name}: recorded runs can only be personalized in narration and cards (no {{audience.*}} in steps, no personalize: rules)`);
+  if (!personalized.needsCapture) {
+    await ensureDir(dir);
+    const run: RunResult = {
+      ...parent,
+      runDir: dir,
+      parentRunId: parent.runId,
+      audience: personalized.audience,
+      sharedCapture: true,
+      steps: parent.steps.map((s) => ({
+        ...s,
+        before: path.resolve(parent.runDir, s.before),
+        after: path.resolve(parent.runDir, s.after),
+        aria: path.resolve(parent.runDir, s.aria),
+        hover: s.hover ? path.resolve(parent.runDir, s.hover) : undefined,
+        typing: s.typing?.map((f) => path.resolve(parent.runDir, f))
+      }))
+    };
+    await ctx.store.saveRun(run);
+    ctx.log.info(`audience ${audience.id}: sharing frames from ${parent.runId}`);
+    return { run, personalized };
+  }
+  ctx.log.info(`run: ${t.flow.name} for ${audience.company} (${personalized.personalizedSteps.length}/${personalized.flow.steps.length} steps personalized)`);
+  const run = await runFlow(personalized.flow, {
+    baseUrl: ctx.baseUrl,
+    out: ctx.out,
+    headless: !o.headed,
+    logger: ctx.log,
+    flowFile: t.file ? rel(ctx, t.file) : undefined,
+    cwd: ctx.cwd,
+    runId: parent.runId,
+    runDir: dir,
+    parentRunId: parent.runId,
+    audience: personalized.audience,
+    personalizedSteps: personalized.personalizedSteps
+  });
+  return { run, personalized };
+}
+
+interface AudienceStamp {
+  audience: Audience;
+  flowHash: string;
+  runId: string;
+  renderedAt: string;
+}
+
+function audienceStampKey(p: PersonalizedFlow): string {
+  return sha256(JSON.stringify({ audience: p.audience, flow: p.flow })).slice(0, 16);
+}
+
+/** Personalized videos for one flow, after its default run passed. */
+async function buildAudiences(ctx: Ctx, t: Target, run: RunResult, audiences: Audience[], o: BuildOpts, defaultUnchanged: boolean): Promise<AudienceReport[]> {
+  const out: AudienceReport[] = [];
+  const slug = ctx.store.slugFor(t.flow.name);
+  for (const a of audiences) {
+    const t0 = Date.now();
+    const ar: AudienceReport = { id: a.id, company: a.company, status: "passed", rendered: false, durationMs: 0 };
+    out.push(ar);
+    try {
+      const personalized = personalizeFlow(t.template, a);
+      ar.personalizedSteps = personalized.personalizedSteps.length;
+      const dir = ctx.store.audienceRendersDir(slug, a.id);
+      const videoPath = path.join(dir, `${slug}.mp4`);
+      const stampPath = path.join(dir, "audience.json");
+      const key = audienceStampKey(personalized);
+      const stamp = (await exists(stampPath)) ? await readJson<AudienceStamp>(stampPath) : undefined;
+      if (defaultUnchanged && !o.force && stamp?.flowHash === key && (await exists(videoPath))) {
+        ar.status = "skipped";
+        ar.reason = "unchanged";
+        ar.video = rel(ctx, videoPath);
+        const poster = videoPath.replace(/\.mp4$/, ".png");
+        if (await exists(poster)) ar.poster = rel(ctx, poster);
+        ctx.log.info(`audience ${a.id}: unchanged, keeping ${rel(ctx, videoPath)}`);
+        continue;
+      }
+      const { run: aRun } = await captureAudience(ctx, t, run, a, { headed: o.headed });
+      ar.capture = aRun.sharedCapture ? "shared" : "captured";
+      if (aRun.status === "failed") {
+        ar.status = "failed";
+        const bad = aRun.steps.find((s) => s.error);
+        ar.reason = bad ? `step ${bad.index + 1}: ${bad.error}` : "run failed";
+        ctx.log.error(`audience ${a.id}: ${ar.reason}`);
+        continue;
+      }
+      if (o.render !== false) {
+        const narration = o.narrate === false ? silentNarration(aRun) : await doNarrate(ctx, { ...t, flow: personalized.flow }, aRun, !!o.verbatim, personalized.audience);
+        const r = await doRender(ctx, { ...t, flow: personalized.flow }, aRun, narration, { fps: o.fps ? Number(o.fps) : undefined, audience: personalized.audience });
+        ar.video = rel(ctx, r.outFile);
+        if (r.poster) ar.poster = rel(ctx, r.poster);
+        ar.rendered = true;
+        await writeJson(stampPath, { audience: a, flowHash: key, runId: run.runId, renderedAt: new Date().toISOString() } satisfies AudienceStamp);
+      }
+    } catch (e) {
+      ar.status = "failed";
+      ar.reason = (e as Error).message.split("\n")[0];
+      ctx.log.error(`audience ${a.id}: ${ar.reason}`);
+    }
+    ar.durationMs = Date.now() - t0;
+  }
+  return out;
+}
+
 async function blessed(ctx: Ctx, slug: string): Promise<RunResult | undefined> {
   const id = await ctx.store.blessedRunId(slug);
   return id ? ctx.store.loadRun(slug, id) : undefined;
@@ -321,7 +510,7 @@ async function doHeal(ctx: Ctx, t: Target, run: RunResult, minConfidence: number
   });
 }
 
-async function doNarrate(ctx: Ctx, t: Target, run: RunResult, verbatim: boolean): Promise<Narration> {
+async function doNarrate(ctx: Ctx, t: Pick<Target, "flow">, run: RunResult, verbatim: boolean, audience?: Audience): Promise<Narration> {
   const llm = verbatim ? null : await ctx.llm().catch((e: Error) => {
     ctx.log.warn(`llm unavailable (${e.message}); narrating verbatim`);
     return null;
@@ -331,10 +520,11 @@ async function doNarrate(ctx: Ctx, t: Target, run: RunResult, verbatim: boolean)
     tts: ctx.tts(),
     fallbackTTS: ctx.fallbackTTS(),
     llm,
-    voice: t.flow.voice ?? ctx.config.voice,
+    voice: audience?.voice ?? t.flow.voice ?? ctx.config.voice,
     glossary: await ctx.glossary(),
     logger: ctx.log,
-    verbatim
+    verbatim,
+    audience
   });
 }
 
@@ -343,21 +533,24 @@ async function loadNarration(run: RunResult): Promise<Narration | undefined> {
   return (await exists(p)) ? readJson<Narration>(p) : undefined;
 }
 
-async function doRender(ctx: Ctx, t: Target, run: RunResult, narration: Narration, o: { fps?: number; captions?: boolean; rebundle?: boolean }) {
+async function doRender(ctx: Ctx, t: Pick<Target, "flow">, run: RunResult, narration: Narration, o: { fps?: number; captions?: boolean; rebundle?: boolean; audience?: Audience }) {
   const slug = ctx.store.slugFor(t.flow.name);
-  const dir = ctx.store.rendersDir(slug);
+  const audience = o.audience && o.audience.id !== "default" ? o.audience : undefined;
+  const dir = audience ? ctx.store.audienceRendersDir(slug, audience.id) : ctx.store.rendersDir(slug);
   const manifest = buildManifest(t.flow, run, narration, {
     fps: o.fps ?? ctx.config.fps,
     captions: o.captions ?? ctx.config.captions,
-    brand: ctx.config.brand
+    brand: ctx.config.brand,
+    audience
   });
   await writeManifest(manifest, path.join(dir, "manifest.json"));
-  ctx.log.info(`render: ${t.flow.name} (${manifest.scenes.length} scenes, ${(manifest.totalDurationMs / 1000).toFixed(1)}s)`);
+  ctx.log.info(`render: ${t.flow.name}${audience ? ` for ${audience.company}` : ""} (${manifest.scenes.length} scenes, ${(manifest.totalDurationMs / 1000).toFixed(1)}s)`);
   return renderVideo(manifest, {
     outFile: path.join(dir, `${slug}.mp4`),
     poster: path.join(dir, `${slug}.png`),
     bundleDir: path.join(ctx.out, "cache", "remotion-bundle"),
     rebundle: o.rebundle,
+    cwd: ctx.cwd,
     log: (m) => ctx.log.info(m),
     onProgress: (p) => ctx.log.debug(`render ${p}%`)
   });
@@ -379,6 +572,8 @@ async function build(ctx: Ctx, targets: Target[], o: BuildOpts): Promise<number>
   const affected = changed
     ? new Map(affectedFlows(targets.filter((t) => t.file).map((t) => ({ flow: t.flow, file: t.file! })), changed).map((a) => [a.flow.name, a]))
     : undefined;
+  const audiences = await resolveAudiences(ctx, o);
+  if (audiences.length) ctx.log.info(`${audiences.length} audience${audiences.length === 1 ? "" : "s"}: ${audiences.map((a) => a.id).join(", ")}`);
 
   for (const t of targets) {
     const t0 = Date.now();
@@ -408,13 +603,15 @@ async function build(ctx: Ctx, targets: Target[], o: BuildOpts): Promise<number>
           flow = r.flow;
           fr.runId = run.runId;
           if (o.writeHeals && t.file && r.heals.some((h) => h.verified)) {
-            await fs.writeFile(t.file, stringifyFlow(flow), "utf8");
+            await fs.writeFile(t.file, stringifyFlow(applyHeals(t.template, r.heals)), "utf8");
             fr.healedFlowWritten = true;
             ctx.log.info(`wrote healed flow ${rel(ctx, t.file)}`);
           }
         }
       }
       fr.status = run.status;
+      // Audience runs personalize the healed flow, so heals carry over to every prospect.
+      const healedTemplate = fr.heals ? applyHeals(t.template, fr.heals) : t.template;
 
       if (base) {
         fr.diff = await compareRuns(base, run, { reportDir: ctx.store.reportsDir(slug) });
@@ -438,6 +635,9 @@ async function build(ctx: Ctx, targets: Target[], o: BuildOpts): Promise<number>
           fr.rendered = true;
         }
       }
+      if (run.status === "passed" && audiences.length) {
+        fr.audiences = await buildAudiences(ctx, { ...t, flow, template: healedTemplate }, run, audiences, o, unchanged);
+      }
       if (run.status === "passed" && !t.recordedRun && (o.bless || !base)) {
         await ctx.store.bless(slug, run.runId);
         fr.blessed = run.runId;
@@ -458,7 +658,7 @@ async function build(ctx: Ctx, targets: Target[], o: BuildOpts): Promise<number>
   await fs.writeFile(path.join(reportDir, "report.md"), md, "utf8");
   await writeJson(path.join(reportDir, "report.json"), { generatedAt: new Date().toISOString(), since: o.since, flows: reports });
   console.log("\n" + md);
-  const broken = reports.some((r) => r.status === "failed");
+  const broken = reports.some((r) => r.status === "failed" || r.audiences?.some((a) => a.status === "failed"));
   return broken && o.failOnBroken !== false ? 1 : 0;
 }
 
@@ -471,10 +671,12 @@ function reportMarkdown(ctx: Ctx, reports: FlowReport[], elapsedMs: number, sinc
   const lines: string[] = [];
   const failed = reports.filter((r) => r.status === "failed").length;
   const changed = reports.filter((r) => r.diff?.needsRender && r.status !== "failed").length;
+  const allAud = reports.flatMap((r) => r.audiences ?? []);
+  const audFailed = allAud.filter((a) => a.status === "failed").length;
   lines.push(`## demo-engine report`);
   lines.push("");
   lines.push(
-    `${failed ? `❌ ${failed} broken` : "✅ no broken flows"} · ${changed} changed · ${reports.filter((r) => r.rendered).length} rendered · ${reports.length} flows in ${(elapsedMs / 1000).toFixed(0)}s${since ? ` · since \`${since}\`` : ""}`
+    `${failed ? `❌ ${failed} broken` : "✅ no broken flows"} · ${changed} changed · ${reports.filter((r) => r.rendered).length} rendered · ${reports.length} flows${allAud.length ? ` · ${allAud.length} personalized (${allAud.filter((a) => a.rendered).length} rendered${audFailed ? `, ${audFailed} failed` : ""})` : ""} in ${(elapsedMs / 1000).toFixed(0)}s${since ? ` · since \`${since}\`` : ""}`
   );
   lines.push("");
   lines.push("| flow | status | video | notes |");
@@ -489,6 +691,14 @@ function reportMarkdown(ctx: Ctx, reports: FlowReport[], elapsedMs: number, sinc
     if (r.heals?.length) notes.push(`${r.heals.filter((h) => h.verified).length}/${r.heals.length} locators healed${r.healedFlowWritten ? " (written)" : ""}`);
     if (r.changedFiles?.length) notes.push(`${r.changedFiles.length} touching files changed`);
     lines.push(`| ${r.name} | ${icon(r)} ${r.status} | ${r.video ? `\`${r.video}\`` : "—"} | ${notes.join(" · ")} |`);
+    for (const a of r.audiences ?? []) {
+      const an: string[] = [];
+      if (a.reason) an.push(a.reason);
+      if (a.capture === "shared") an.push("frames shared with default");
+      else if (a.capture === "captured") an.push(`${a.personalizedSteps ?? 0} personalized step${a.personalizedSteps === 1 ? "" : "s"}`);
+      const ai = a.status === "failed" ? "❌" : a.status === "skipped" ? "⏭️" : "✅";
+      lines.push(`| ↳ ${a.company} (\`${a.id}\`) | ${ai} ${a.status} | ${a.video ? `\`${a.video}\`` : "—"} | ${an.join(" · ")} |`);
+    }
   }
   for (const r of reports) {
     if (r.diff && r.diff.needsRender) {

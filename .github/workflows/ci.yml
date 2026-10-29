@@ -16,7 +16,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - name: Example end-to-end (silent, no keys)
         working-directory: examples/todomvc
-        run: node ../../packages/cli/dist/index.js build demos --no-narrate
+        run: node ../../packages/cli/dist/index.js build demos --no-narrate --audiences acme demos/prospects.csv
       - uses: actions/upload-artifact@v4
         with:
           name: example-renders

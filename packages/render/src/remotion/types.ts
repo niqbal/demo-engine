@@ -7,7 +7,7 @@ export interface Rect {
 
 export interface SceneProps {
   index: number;
-  kind: "title" | "step";
+  kind: "title" | "step" | "end";
   text: string;
   audio?: string; // data url or static path
   durationMs: number;
@@ -22,6 +22,15 @@ export interface SceneProps {
   actionKind: string;
 }
 
+export interface AudienceProps {
+  id: string;
+  company: string;
+  logo?: string; // data url
+  industry?: string;
+  contact?: { first?: string; last?: string; title?: string };
+  rep?: { name?: string; title?: string; email?: string; calendar?: string; photo?: string };
+}
+
 export interface VideoProps {
   title: string;
   subtitle?: string;
@@ -30,7 +39,9 @@ export interface VideoProps {
   height: number;
   scale: number;
   captions: boolean;
-  brand: { accent: string; background: string; logo?: string };
+  brand: { accent: string; background: string; logo?: string; title?: string };
+  audience?: AudienceProps;
+  end?: { text: string; url?: string };
   scenes: SceneProps[];
   totalFrames: number;
 }

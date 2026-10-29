@@ -2,11 +2,12 @@ import path from "node:path";
 import type { Narration } from "./narrate.js";
 import type { Rect, RunResult } from "./runner.js";
 import type { Config, Flow } from "./schema.js";
+import type { Audience } from "./audience.js";
 import { writeJson } from "./util.js";
 
 export interface Scene {
   index: number;
-  kind: "title" | "step";
+  kind: "title" | "step" | "end";
   text: string;
   audio?: string;
   durationMs: number;
@@ -21,6 +22,16 @@ export interface Scene {
   actionKind: string;
 }
 
+/** Who the video is for. Rendered on the title card ("Made for Acme") and the end card (the rep). */
+export interface ManifestAudience {
+  id: string;
+  company: string;
+  logo?: string;
+  industry?: string;
+  contact?: { first?: string; last?: string; title?: string };
+  rep?: { name?: string; title?: string; email?: string; calendar?: string; photo?: string };
+}
+
 export interface Manifest {
   version: 1;
   title: string;
@@ -30,7 +41,9 @@ export interface Manifest {
   height: number;
   scale: number;
   captions: boolean;
-  brand: { accent: string; background: string; logo?: string };
+  brand: { accent: string; background: string; logo?: string; title?: string };
+  audience?: ManifestAudience;
+  end?: { text: string; url?: string };
   scenes: Scene[];
   totalFrames: number;
   totalDurationMs: number;
@@ -43,6 +56,7 @@ export interface ManifestOptions {
   title?: boolean;
   minSceneMs?: number;
   tailMs?: number;
+  audience?: Audience;
 }
 
 export function buildManifest(flow: Flow, run: RunResult, narration: Narration, opts: ManifestOptions = {}): Manifest {
@@ -50,9 +64,10 @@ export function buildManifest(flow: Flow, run: RunResult, narration: Narration, 
   const minSceneMs = opts.minSceneMs ?? 2600;
   const tailMs = opts.tailMs ?? 700;
   const toFrames = (ms: number) => Math.max(1, Math.round((ms / 1000) * fps));
+  const audience = opts.audience && opts.audience.id !== "default" ? opts.audience : undefined;
   const scenes: Scene[] = [];
   if (opts.title !== false) {
-    const ms = 1800;
+    const ms = audience ? 2400 : 1800;
     scenes.push({ index: -1, kind: "title", text: flow.name, durationMs: ms, frames: toFrames(ms), actionKind: "none" });
   }
   for (const s of run.steps) {
@@ -76,6 +91,14 @@ export function buildManifest(flow: Flow, run: RunResult, narration: Narration, 
       actionKind: s.action.kind
     });
   }
+  // End card when the flow asks for one, the brand has a call to action, or the audience names a rep.
+  const endText = flow.end?.text ?? opts.brand?.cta ?? (audience?.rep?.name ? `Questions? Talk to ${audience.rep.name}.` : undefined);
+  let end: Manifest["end"] | undefined;
+  if (endText !== undefined || flow.end || audience?.rep) {
+    end = { text: endText ?? "Thanks for watching.", url: audience?.rep?.calendar ?? flow.end?.url ?? opts.brand?.url };
+    const ms = 3200;
+    scenes.push({ index: run.steps.length, kind: "end", text: end.text, durationMs: ms, frames: toFrames(ms), actionKind: "none" });
+  }
   const totalFrames = scenes.reduce((a, s) => a + s.frames, 0);
   return {
     version: 1,
@@ -87,10 +110,22 @@ export function buildManifest(flow: Flow, run: RunResult, narration: Narration, 
     scale: run.scale,
     captions: opts.captions ?? true,
     brand: {
-      accent: opts.brand?.accent ?? "#4F46E5",
+      accent: audience?.accent ?? opts.brand?.accent ?? "#4F46E5",
       background: opts.brand?.background ?? "#0B0F19",
-      logo: opts.brand?.logo
+      logo: opts.brand?.logo,
+      title: opts.brand?.title
     },
+    audience: audience
+      ? {
+          id: audience.id,
+          company: audience.company,
+          logo: audience.logo,
+          industry: audience.industry,
+          contact: audience.contact,
+          rep: audience.rep
+        }
+      : undefined,
+    end,
     scenes,
     totalFrames,
     totalDurationMs: scenes.reduce((a, s) => a + s.durationMs, 0)

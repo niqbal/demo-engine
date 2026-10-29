@@ -1,4 +1,5 @@
 export * from "./schema.js";
+export * from "./audience.js";
 export * from "./locators.js";
 export * from "./runner.js";
 export * from "./store.js";

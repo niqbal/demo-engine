@@ -261,3 +261,16 @@ export async function healFlow(flow: Flow, failedRun: RunResult, opts: HealOptio
   const unresolved = run.steps.filter((s) => s.error).map((s) => s.index);
   return { flow: current, run, heals, unresolved };
 }
+
+/**
+ * Re-apply verified heals to another copy of the flow, e.g. the untemplated file on disk after
+ * healing ran on the default-audience rendering of it. Locators do not carry `{{audience.*}}`
+ * values in practice, so the patched locator is copied as is.
+ */
+export function applyHeals(flow: Flow, heals: Heal[]): Flow {
+  const steps = flow.steps.map((s, i) => {
+    const h = heals.filter((x) => x.verified && x.stepIndex === i).pop();
+    return h ? setTarget(s, h.to) : s;
+  });
+  return { ...flow, steps };
+}

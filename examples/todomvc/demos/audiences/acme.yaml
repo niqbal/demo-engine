@@ -1,0 +1,9 @@
+# One prospect. Anything here is reachable from flows as {{audience.<field>}}.
+company: Acme Logistics
+workspace: acme
+industry: Logistics
+task: Confirm Q4 carrier contracts
+logo: demos/audiences/logos/acme.svg
+contact: { first: Priya, last: Raman, title: Head of Operations }
+rep: { name: Asad Iqbal, title: "Founder, demo-engine", calendar: https://cal.com/demo-engine/15min }
+pitch: Ops team of 40 tracks carrier tasks in spreadsheets; evaluating a shared task list for warehouse leads.

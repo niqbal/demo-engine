@@ -4,11 +4,15 @@ import {
   createLLM,
   createLogger,
   createTTS,
+  defaultAudience,
   exists,
+  loadAudiences,
   parseConfig,
   parseFlow,
+  personalizeFlow,
   readJson,
   Store,
+  type Audience,
   type Config,
   type Flow,
   type LLM,
@@ -74,9 +78,54 @@ export async function loadContext(opts: GlobalOpts): Promise<Ctx> {
 export interface Target {
   /** Flow file on disk (undefined for recorded runs). */
   file?: string;
+  /** The flow rendered for the default audience (`defaults:` applied). What run, diff and heal use. */
   flow: Flow;
+  /** The flow exactly as written, with `{{audience.*}}` intact. What gets written back after heals. */
+  template: Flow;
   /** A pre-recorded run directory (from @demo-engine/playwright). */
   recordedRun?: RunResult;
+}
+
+function toTarget(template: Flow, extra: Omit<Target, "flow" | "template">): Target {
+  return { ...extra, template, flow: personalizeFlow(template, defaultAudience(template)).flow };
+}
+
+export interface AudienceOpts {
+  audience?: string;
+  audiences?: string[] | true;
+}
+
+/** Directory bare audience names resolve against. */
+export function audiencesDir(ctx: Ctx): string {
+  return path.resolve(ctx.cwd, ctx.config.audiences ?? path.join(ctx.config.demos, "audiences"));
+}
+
+/**
+ * `--audience acme` / `--audiences acme globex` / `--audiences prospects.csv` / `--audiences` (all).
+ * Bare names resolve against the audiences dir, with .yaml/.yml/.json tried in that order.
+ */
+export async function resolveAudiences(ctx: Ctx, o: AudienceOpts): Promise<Audience[]> {
+  const dir = audiencesDir(ctx);
+  const inputs: string[] = [];
+  if (o.audience) inputs.push(o.audience);
+  if (o.audiences === true) {
+    if (!(await exists(dir))) throw new Error(`--audiences given without names and ${rel(ctx, dir)} does not exist`);
+    inputs.push(dir);
+  } else if (o.audiences) inputs.push(...o.audiences);
+  const resolved: string[] = [];
+  for (const a of inputs) {
+    const direct = path.resolve(ctx.cwd, a);
+    if (await exists(direct)) {
+      resolved.push(direct);
+      continue;
+    }
+    const candidates = [a, `${a}.yaml`, `${a}.yml`, `${a}.json`, `${a}.csv`].map((n) => path.join(dir, n));
+    let found: string | undefined;
+    for (const c of candidates) if (await exists(c)) { found = c; break; }
+    if (!found) throw new Error(`audience not found: ${a} (looked in ${rel(ctx, dir)})`);
+    resolved.push(found);
+  }
+  return loadAudiences(resolved);
 }
 
 async function walk(dir: string): Promise<string[]> {
@@ -105,12 +154,12 @@ export async function resolveTargets(ctx: Ctx, args: string[]): Promise<Target[]
         const run = await readJson<RunResult>(path.join(p, "run.json"));
         const flowFile = path.join(p, "flow.yaml");
         if (!(await exists(flowFile))) throw new Error(`${a}: run.json without flow.yaml`);
-        targets.push({ flow: parseFlow(await fs.readFile(flowFile, "utf8"), flowFile), recordedRun: { ...run, runDir: p } });
+        targets.push(toTarget(parseFlow(await fs.readFile(flowFile, "utf8"), flowFile), { recordedRun: { ...run, runDir: p } }));
         continue;
       }
-      for (const f of await walk(p)) targets.push({ file: f, flow: parseFlow(await fs.readFile(f, "utf8"), f) });
+      for (const f of await walk(p)) targets.push(toTarget(parseFlow(await fs.readFile(f, "utf8"), f), { file: f }));
     } else {
-      targets.push({ file: p, flow: parseFlow(await fs.readFile(p, "utf8"), p) });
+      targets.push(toTarget(parseFlow(await fs.readFile(p, "utf8"), p), { file: p }));
     }
   }
   if (!targets.length) throw new Error(`no *.flow.yaml files found in ${inputs.join(", ")}`);

@@ -4,9 +4,10 @@ import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright";
 import { resolveLocator, toLocator, type Resolution } from "./locators.js";
-import { stepAction, type ActionKind, type Flow, type LocatorSpec, type StepSpec } from "./schema.js";
+import { stepAction, type ActionKind, type Flow, type LocatorSpec, type PersonalizeRule, type StepSpec } from "./schema.js";
 import { ensureDir, sha256, silentLogger, timestampId, type Logger } from "./util.js";
 import { Store } from "./store.js";
+import type { Audience } from "./audience.js";
 
 export interface Rect {
   x: number;
@@ -36,6 +37,8 @@ export interface StepResult {
   expect?: { ok: boolean; message?: string };
   error?: string;
   cascade?: boolean;
+  /** True when this frame differs per audience (references audience data, follows a personalized state change, or an overlay applies). */
+  personalized?: boolean;
   url: string;
   durationMs: number;
 }
@@ -58,6 +61,12 @@ export interface RunResult {
   steps: StepResult[];
   /** Files changed in the product repo for this run, when known (git integration). */
   changedFiles?: string[];
+  /** The audience this run was captured for; absent for the default audience. */
+  audience?: Audience;
+  /** For an audience run: the default-audience run it belongs to. */
+  parentRunId?: string;
+  /** Set when the audience run reused the default run's frames (nothing in the app depends on the audience). */
+  sharedCapture?: boolean;
 }
 
 export interface RunOptions {
@@ -75,6 +84,15 @@ export interface RunOptions {
   cwd?: string;
   /** Called after each step completes (for progress output). */
   onStep?: (s: StepResult) => void;
+  /** Audience this run is captured for. Exposed to `setup:` as AUDIENCE_ID / AUDIENCE_JSON. */
+  audience?: Audience;
+  /** DOM rewrites applied before every screenshot (already rendered for the audience). */
+  personalize?: PersonalizeRule[];
+  /** Step indices that are personalized for this audience (marks frames in run.json). */
+  personalizedSteps?: number[];
+  /** Absolute directory to write into instead of `runs/<slug>/<runId>` (audience runs). */
+  runDir?: string;
+  parentRunId?: string;
 }
 
 const DISABLE_MOTION_CSS = `
@@ -143,6 +161,41 @@ async function runShell(cmd: string, env: NodeJS.ProcessEnv, cwd: string, log: L
   });
 }
 
+/**
+ * Layer 2 personalization: rewrite matching DOM nodes in place. Idempotent, so it is safe to run
+ * before every screenshot; SPA re-renders that replace the nodes are repainted on the next call.
+ */
+export async function applyPersonalize(page: Page, rules: PersonalizeRule[] | undefined): Promise<number> {
+  if (!rules?.length) return 0;
+  try {
+    return await page.evaluate((rs: PersonalizeRule[]) => {
+      let n = 0;
+      for (const r of rs) {
+        let nodes: Element[];
+        try {
+          nodes = r.all === false ? [document.querySelector(r.css)].filter(Boolean) as Element[] : Array.from(document.querySelectorAll(r.css));
+        } catch {
+          continue;
+        }
+        for (const el of nodes) {
+          if (r.text !== undefined && el.textContent !== r.text) el.textContent = r.text;
+          if (r.html !== undefined && el.innerHTML !== r.html) el.innerHTML = r.html;
+          if (r.src !== undefined && el.getAttribute("src") !== r.src) {
+            el.setAttribute("src", r.src);
+            if (el instanceof HTMLImageElement) el.removeAttribute("srcset");
+          }
+          if (r.style !== undefined) (el as HTMLElement).style.cssText += ";" + r.style;
+          if (r.attr) for (const [k, v] of Object.entries(r.attr)) if (el.getAttribute(k) !== v) el.setAttribute(k, v);
+          n++;
+        }
+      }
+      return n;
+    }, rules);
+  } catch {
+    return 0;
+  }
+}
+
 async function applyAuth(flow: Flow, context: BrowserContext, page: Page, opts: RunOptions, log: Logger): Promise<void> {
   if (!flow.auth?.login) return;
   const file = path.resolve(opts.cwd ?? process.cwd(), flow.auth.login);
@@ -158,15 +211,28 @@ export async function runFlow(flow: Flow, opts: RunOptions = {}): Promise<RunRes
   const store = new Store(opts.out ?? ".demo-engine");
   const slug = store.slugFor(flow.name);
   const runId = opts.runId ?? timestampId();
-  const runDir = path.resolve(store.runDir(slug, runId));
+  const runDir = path.resolve(opts.runDir ?? store.runDir(slug, runId));
   const stepsDir = path.join(runDir, "steps");
   await ensureDir(stepsDir);
   const steps = opts.stepsOverride ?? flow.steps;
   const scale = 2;
   const startUrl = resolveUrl(flow.url, opts.baseUrl);
   const cwd = opts.cwd ?? process.cwd();
+  const personalized = new Set(opts.personalizedSteps ?? []);
+  const rules = opts.personalize ?? flow.personalize;
 
-  if (flow.setup) await runShell(flow.setup, { BASE_URL: opts.baseUrl ?? "" }, cwd, log);
+  if (flow.setup) {
+    await runShell(
+      flow.setup,
+      {
+        BASE_URL: opts.baseUrl ?? "",
+        AUDIENCE_ID: opts.audience?.id ?? "default",
+        AUDIENCE_JSON: JSON.stringify(opts.audience ?? {})
+      },
+      cwd,
+      log
+    );
+  }
 
   const result: RunResult = {
     version: 1,
@@ -184,7 +250,9 @@ export async function runFlow(flow: Flow, opts: RunOptions = {}): Promise<RunRes
     scale,
     status: "passed",
     steps: [],
-    changedFiles: opts.changedFiles
+    changedFiles: opts.changedFiles,
+    audience: opts.audience,
+    parentRunId: opts.parentRunId
   };
 
   let browser: Browser | undefined;
@@ -212,10 +280,15 @@ export async function runFlow(flow: Flow, opts: RunOptions = {}): Promise<RunRes
     }, DISABLE_MOTION_CSS);
 
     const page = await context.newPage();
+    const shot = async (rel: string) => {
+      await applyPersonalize(page, rules);
+      await page.screenshot({ path: path.join(runDir, rel), fullPage: false });
+    };
     await applyAuth(flow, context, page, opts, log);
-    log.info(`open ${startUrl}`);
+    log.info(`open ${startUrl}${opts.audience ? `  (audience: ${opts.audience.id})` : ""}`);
     await page.goto(startUrl);
     await settle(page, log);
+    if (rules?.length) log.info(`personalize: ${await applyPersonalize(page, rules)} node(s) rewritten by ${rules.length} rule(s)`);
 
     let failedBefore = false;
     for (let i = 0; i < steps.length; i++) {
@@ -232,6 +305,7 @@ export async function runFlow(flow: Flow, opts: RunOptions = {}): Promise<RunRes
         after: `steps/${n}-after.png`,
         aria: `steps/${n}-aria.txt`,
         masks: [],
+        personalized: personalized.has(i) || undefined,
         url: page.url(),
         durationMs: 0
       };
@@ -252,20 +326,20 @@ export async function runFlow(flow: Flow, opts: RunOptions = {}): Promise<RunRes
           const box = await target!.boundingBox();
           if (box) sr.targetRect = box;
         }
-        await page.screenshot({ path: path.join(runDir, sr.before), fullPage: false });
+        await shot(sr.before);
         if (target && (act.kind === "click" || act.kind === "dblclick" || act.kind === "check" || act.kind === "select")) {
           try {
             await target.hover({ timeout: 2000 });
             await page.waitForTimeout(120);
             sr.hover = `steps/${n}-hover.png`;
-            await page.screenshot({ path: path.join(runDir, sr.hover), fullPage: false });
+            await shot(sr.hover);
           } catch {
             sr.hover = undefined;
           }
         }
 
         if (target && (act.kind === "fill" || act.kind === "type")) {
-          sr.typing = await typeWithFrames(page, target, step, act.kind, runDir, n);
+          sr.typing = await typeWithFrames(page, target, step, act.kind, shot, n);
         } else {
           await performAction(page, step, act.kind, target);
         }
@@ -289,7 +363,7 @@ export async function runFlow(flow: Flow, opts: RunOptions = {}): Promise<RunRes
         }
         if (step.pause) await page.waitForTimeout(step.pause);
         sr.masks = await rectsFor(page, [...(flow.mask ?? []), ...(step.mask ?? [])]);
-        await page.screenshot({ path: path.join(runDir, sr.after), fullPage: false });
+        await shot(sr.after);
         try {
           const aria = await page.locator("body").ariaSnapshot();
           await fs.writeFile(path.join(runDir, sr.aria), aria, "utf8");
@@ -330,7 +404,7 @@ export async function runFlow(flow: Flow, opts: RunOptions = {}): Promise<RunRes
 }
 
 /** Type character by character, capturing a frame every few characters for a real typing animation. */
-async function typeWithFrames(page: Page, target: Locator, step: StepSpec, kind: "fill" | "type", runDir: string, n: string): Promise<string[]> {
+async function typeWithFrames(page: Page, target: Locator, step: StepSpec, kind: "fill" | "type", shot: (rel: string) => Promise<void>, n: string): Promise<string[]> {
   const value = kind === "fill" ? step.fill!.value : step.type!.value;
   const press = step.press;
   const frames: string[] = [];
@@ -341,7 +415,7 @@ async function typeWithFrames(page: Page, target: Locator, step: StepSpec, kind:
     await page.keyboard.type(value[i]);
     if ((i + 1) % every === 0 || i === value.length - 1) {
       const rel = `steps/${n}-typing-${String(frames.length + 1).padStart(2, "0")}.png`;
-      await page.screenshot({ path: path.join(runDir, rel), fullPage: false });
+      await shot(rel);
       frames.push(rel);
     }
   }

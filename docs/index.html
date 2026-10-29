@@ -48,7 +48,7 @@ footer{padding:40px 0;color:var(--muted);font-size:14px;border-top:1px solid var
 <div class="wrap">
 <header>
   <div class="logo">demo<b>-</b>engine</div>
-  <nav><a href="#how">How it works</a><a href="#integrate">Integrate</a><a href="https://github.com/niqbal/demo-engine">GitHub</a><a href="https://www.npmjs.com/package/demo-engine">npm</a></nav>
+  <nav><a href="#how">How it works</a><a href="#integrate">Integrate</a><a href="#audiences">Personalize</a><a href="https://github.com/niqbal/demo-engine">GitHub</a><a href="https://www.npmjs.com/package/demo-engine">npm</a></nav>
 </header>
 
 <div class="hero">
@@ -128,9 +128,52 @@ footer{padding:40px 0;color:var(--muted);font-size:14px;border-top:1px solid var
   </table>
 </section>
 
+<section id="audiences">
+  <h2>One flow. Every prospect.</h2>
+  <p class="sub">An audience is a prospect: company, logo, the person watching, the rep presenting, the data they should see. <code>flow × audience</code> is a personalized video, and all of them are regenerated when the product changes.</p>
+  <div class="two">
+<pre><span class="c"># demos/audiences/acme.yaml</span>
+<span class="k">company</span>: Acme Logistics
+<span class="k">industry</span>: Logistics
+<span class="k">task</span>: Confirm Q4 carrier contracts
+<span class="k">logo</span>: demos/audiences/logos/acme.svg
+<span class="k">contact</span>: { first: Priya, title: Head of Operations }
+<span class="k">rep</span>: { name: Asad Iqbal, calendar: https://cal.com/… }
+<span class="k">pitch</span>: Ops team of 40 tracks carrier tasks in spreadsheets.
+
+<span class="c"># in the flow</span>
+<span class="k">defaults</span>: { company: your team, task: Write the launch post }
+<span class="k">personalize</span>:
+  - { css: <span class="s">"header h1"</span>, text: <span class="s">"{{audience.company}}"</span> }
+<span class="k">steps</span>:
+  - <span class="k">say</span>: Add the next thing {{audience.company}} needs done.
+    <span class="k">type</span>: { target: { placeholder: <span class="s">"What needs to be done?"</span> }, value: <span class="s">"{{audience.task}}"</span> }</pre>
+<pre><span class="c">$ demo-engine build demos --audiences demos/prospects.csv</span>
+
+| flow                   | status     | notes                 |
+|------------------------|------------|-----------------------|
+| Add and complete todos | ✅ passed  | 6 unchanged           |
+| ↳ Acme Logistics       | ✅ passed  | 6 personalized steps  |
+| ↳ Globex               | ✅ passed  | 6 personalized steps  |
+| ↳ Initech              | ⏭️ skipped | unchanged             |
+
+<span class="c"># three layers, each optional</span>
+1  Data in the app   setup: seeds a tenant ($AUDIENCE_ID)
+2  Overlay           personalize: repaints the DOM
+3  Narration, cards  {{audience.*}}, logo × logo, rep card
+
+<span class="c"># why 500 prospects is cheap</span>
+shared frames when nothing on screen changes
+narration cached per line; only new sentences cost
+unchanged audiences skipped outright
+heals on the default run apply to everyone</pre>
+  </div>
+</section>
+
 <section>
   <h2>Who it is for</h2>
   <div class="grid">
+    <div class="card"><h3>Sales</h3><p>A personalized demo per prospect, straight from the CRM, with their name, logo and data. Still correct after the next release.</p></div>
     <div class="card"><h3>Product marketing</h3><p>Launch videos that match the product on launch day, and still match a quarter later.</p></div>
     <div class="card"><h3>Docs and support</h3><p>Help-center walkthroughs regenerated with every release. Zero re-recording.</p></div>
     <div class="card"><h3>Engineering</h3><p>A demo that breaks is a regression you caught before a customer did.</p></div>

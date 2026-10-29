@@ -1,5 +1,6 @@
 import React from "react";
 import { AbsoluteFill, Sequence } from "remotion";
+import { EndScene } from "./EndScene";
 import { StepScene } from "./StepScene";
 import { TitleScene } from "./TitleScene";
 import type { VideoProps } from "./types";
@@ -13,7 +14,13 @@ export const DemoVideo: React.FC<VideoProps> = (video) => {
     const cursorFrom = cursor;
     items.push(
       <Sequence key={`${scene.kind}-${scene.index}`} from={start} durationInFrames={scene.frames} name={scene.text.slice(0, 40)}>
-        {scene.kind === "title" ? <TitleScene scene={scene} video={video} /> : <StepScene scene={scene} video={video} cursorFrom={cursorFrom} />}
+        {scene.kind === "title" ? (
+          <TitleScene scene={scene} video={video} />
+        ) : scene.kind === "end" ? (
+          <EndScene scene={scene} video={video} />
+        ) : (
+          <StepScene scene={scene} video={video} cursorFrom={cursorFrom} />
+        )}
       </Sequence>
     );
     if (scene.targetRect) cursor = { x: scene.targetRect.x + scene.targetRect.width / 2, y: scene.targetRect.y + scene.targetRect.height / 2 };
