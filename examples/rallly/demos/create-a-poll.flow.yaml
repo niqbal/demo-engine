@@ -1,0 +1,29 @@
+name: Create a scheduling poll
+description: Name an event, pick candidate dates and get a poll ready to share.
+url: ${BASE_URL}/new
+defaults:
+  company: your team
+  event: Q4 roadmap review
+  location: Berlin office, 4th floor
+end:
+  text: No account needed. Create a poll and share the link.
+  url: https://rallly.co
+steps:
+  - say: Start with a title. {{audience.company}} can create a poll without an account.
+    fill: { target: { placeholder: "Monthly Meetup" }, value: "{{audience.event}}" }
+  - say: Add a location so people know where to show up.
+    click: { role: button, name: "Add location" }
+  - say: Type it in.
+    fill: { target: { placeholder: "Joe's Coffee Shop" }, value: "{{audience.location}}" }
+  - say: Pick candidate dates on the calendar. Jump to next month.
+    click: { role: button, name: "Go to the next month" }
+  - say: Click each date you want to offer.
+    click: { role: button, name: "10", exact: true }
+  - say: Add a second option.
+    click: { role: button, name: "12", exact: true }
+  - say: And a third. Each date gets a time slot you can adjust.
+    click: { role: button, name: "13", exact: true }
+    expect: { text: "3 times selected" }
+  - say: Allow comments so participants can discuss, then create the poll and share the link.
+    click: { role: switch, name: "Comments" }
+    expect: { text: "Create poll" }

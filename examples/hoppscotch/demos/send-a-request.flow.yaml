@@ -1,0 +1,28 @@
+name: Send your first request
+description: Add a query parameter, send the request, read the response and generate code for it.
+url: ${BASE_URL}/
+# The response line shows a timing that differs every run; keep it out of the diff.
+mask:
+  - ".success-response"
+ignore:
+  - "\\d+ ms"
+defaults:
+  company: your team
+  param_key: team
+  param_value: platform
+end:
+  text: Hoppscotch is open source. Try it with your own API.
+  url: https://hoppscotch.io
+steps:
+  - say: Hoppscotch opens on a request that's ready to send. Add a query parameter by typing a key.
+    fill: { target: { role: textbox, name: Key, nth: 0 }, value: "{{audience.param_key}}" }
+  - say: And its value. Every row you fill adds the next empty one.
+    fill: { target: { role: textbox, name: Value, nth: 0 }, value: "{{audience.param_value}}" }
+  - say: Hit Send. Status, time and size come back with the response body.
+    click: { css: "button:has-text('Send')", nth: 0 }
+    expect: { text: "Status: 200" }
+  - say: Response headers are one click away.
+    click: { role: button, name: Headers, nth: 1 }
+    zoom: { scale: 1.4 }
+  - say: When it works, generate the same request as code for {{audience.company}}'s language of choice.
+    click: { role: button, name: "Generate Code" }

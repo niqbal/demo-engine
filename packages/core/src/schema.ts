@@ -84,6 +84,8 @@ export const StepSchema = z
     expect: ExpectSchema.optional(),
     zoom: ZoomSchema.optional(),
     mask: z.array(z.string()).optional(),
+    /** Regexes; matching text is dropped from the content diff (volatile values such as timings or counters). */
+    ignore: z.array(z.string()).optional(),
     pause: z.number().optional(),
     highlight: LocatorSchema.optional()
   })
@@ -134,7 +136,10 @@ export const FlowSchema = z
     voice: z.string().optional(),
     touches: z.array(z.string()).optional(),
     setup: z.string().optional(),
+    /** CSS selectors hidden from both the pixel diff and the content diff (clocks, live counters). */
     mask: z.array(z.string()).optional(),
+    /** Regexes; matching text is dropped from the content diff. */
+    ignore: z.array(z.string()).optional(),
     /** Default audience values. CI, diff and heal run with these; `--audience` overrides them per prospect. */
     defaults: z.record(z.string(), z.unknown()).optional(),
     /** DOM rewrites applied before each screenshot (see PersonalizeRuleSchema). */

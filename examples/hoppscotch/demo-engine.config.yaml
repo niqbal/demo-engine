@@ -1,0 +1,8 @@
+baseUrl: https://hoppscotch.io
+out: .demo-engine
+demos: demos
+brand:
+  logo: brand/logo.svg
+  accent: "#6366F1"
+  title: Hoppscotch
+tts: kokoro

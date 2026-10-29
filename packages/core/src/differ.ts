@@ -45,6 +45,19 @@ export interface DiffOptions {
   noiseFloor?: number; // ratio below which we call it unchanged
 }
 
+/** Replace text matching any of `patterns` (regex sources) with a placeholder so volatile values do not count as content changes. */
+export function applyIgnore(text: string, patterns: string[]): string {
+  let out = text;
+  for (const p of patterns) {
+    try {
+      out = out.replace(new RegExp(p, "g"), "…");
+    } catch {
+      /* bad pattern: ignore */
+    }
+  }
+  return out;
+}
+
 function normalizeAria(text: string): string[] {
   return text
     .split("\n")
@@ -156,8 +169,9 @@ async function compareStep(
   if (a.say !== b.say) d.reasons.push("narration text changed");
 
   // Content: accessibility tree lines.
-  const ariaA = normalizeAria(await fs.readFile(path.join(baseRun.runDir, a.aria), "utf8").catch(() => ""));
-  const ariaB = normalizeAria(await fs.readFile(path.join(candRun.runDir, b.aria), "utf8").catch(() => ""));
+  const ignore = b.ignore ?? a.ignore ?? [];
+  const ariaA = normalizeAria(applyIgnore(await fs.readFile(path.join(baseRun.runDir, a.aria), "utf8").catch(() => ""), ignore));
+  const ariaB = normalizeAria(applyIgnore(await fs.readFile(path.join(candRun.runDir, b.aria), "utf8").catch(() => ""), ignore));
   const delta = lineDelta(ariaA, ariaB);
   d.ariaAdded = delta.added;
   d.ariaRemoved = delta.removed;

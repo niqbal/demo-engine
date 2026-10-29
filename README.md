@@ -172,7 +172,8 @@ Report on a PR that renamed a button:
 | `auth.login` | A `.mjs` file exporting `async (page, context, { baseUrl })` that signs in before the flow. |
 | `touches` | Globs over your repo. Changed files matching them mark the flow as affected. |
 | `setup` | Shell command run before the flow (seed a demo tenant). `BASE_URL` is in the env. |
-| `mask` | CSS selectors ignored by the visual diff (clocks, avatars). |
+| `mask` | CSS selectors hidden from the diff: the region is excluded from the pixel comparison and the elements are left out of the content comparison (clocks, live counters). Flow-level or per step. |
+| `ignore` | Regexes whose matches are dropped from the content comparison, for volatile text with no selector of its own (`"\\d+ ms"`). Flow-level or per step. |
 | `viewport`, `voice` | Default 1440×900 at 2×. Voice is provider-specific. |
 | `defaults` | Default audience values. Any string in the flow may use `{{audience.field}}` or `{{audience.field \| "fallback"}}`. |
 | `personalize` | DOM rewrites applied before every screenshot: `{ css, text?, src?, html?, style?, attr?, all? }`. |

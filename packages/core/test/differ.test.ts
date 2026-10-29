@@ -62,3 +62,13 @@ describe("differ", () => {
     expect(rb.broken).toBe(true);
   });
 });
+
+describe("applyIgnore", () => {
+  it("drops volatile text matched by ignore patterns", async () => {
+    const { applyIgnore } = await import("../src/differ.js");
+    const a = applyIgnore("- text: Status: 200 Time: 1586 ms Size: 1.99 KB", ["\\d+ ms", "[\\d.]+ KB"]);
+    const b = applyIgnore("- text: Status: 200 Time: 1412 ms Size: 2.01 KB", ["\\d+ ms", "[\\d.]+ KB"]);
+    expect(a).toBe(b);
+    expect(applyIgnore("x", ["("])).toBe("x");
+  });
+});

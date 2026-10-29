@@ -34,6 +34,8 @@ export interface StepResult {
   typing?: string[];
   aria: string; // relative path to aria snapshot text
   masks: Rect[];
+  /** Regexes applied to the accessibility text before diffing. */
+  ignore?: string[];
   expect?: { ok: boolean; message?: string };
   error?: string;
   cascade?: boolean;
@@ -133,6 +135,50 @@ async function settle(page: Page, log: Logger): Promise<void> {
     /* ignore */
   }
   await page.waitForTimeout(300);
+}
+
+
+/** Run `fn` while masked elements are aria-hidden, so a masked region leaves the content diff as well as the pixel diff. */
+async function withMaskedAria<T>(page: Page, selectors: string[], fn: () => Promise<T>): Promise<T> {
+  if (!selectors.length) return fn();
+  const ATTR = "data-demo-engine-masked";
+  const hidden = await page
+    .evaluate(
+      ([sels, attr]) => {
+        let n = 0;
+        for (const sel of sels) {
+          let els: Element[] = [];
+          try {
+            els = Array.from(document.querySelectorAll(sel));
+          } catch {
+            continue;
+          }
+          for (const el of els) {
+            if (el.hasAttribute("aria-hidden")) continue;
+            el.setAttribute("aria-hidden", "true");
+            el.setAttribute(attr, "1");
+            n++;
+          }
+        }
+        return n;
+      },
+      [selectors, ATTR] as const
+    )
+    .catch(() => 0);
+  try {
+    return await fn();
+  } finally {
+    if (hidden) {
+      await page
+        .evaluate((attr) => {
+          for (const el of Array.from(document.querySelectorAll(`[${attr}]`))) {
+            el.removeAttribute("aria-hidden");
+            el.removeAttribute(attr);
+          }
+        }, ATTR)
+        .catch(() => undefined);
+    }
+  }
 }
 
 async function rectsFor(page: Page, selectors: string[]): Promise<Rect[]> {
@@ -268,6 +314,8 @@ export async function runFlow(flow: Flow, opts: RunOptions = {}): Promise<RunRes
       timezoneId: "UTC"
     });
     context.setDefaultTimeout(opts.timeoutMs ?? 10_000);
+    // Page loads are slower than element actions; a cold SPA can take 15-20 s.
+    context.setDefaultNavigationTimeout(Math.max(30_000, (opts.timeoutMs ?? 10_000) * 3));
     await context.addInitScript((css: string) => {
       const add = () => {
         const s = document.createElement("style");
@@ -362,10 +410,13 @@ export async function runFlow(flow: Flow, opts: RunOptions = {}): Promise<RunRes
           sr.zoomScale = step.zoom.scale;
         }
         if (step.pause) await page.waitForTimeout(step.pause);
-        sr.masks = await rectsFor(page, [...(flow.mask ?? []), ...(step.mask ?? [])]);
+        const maskSelectors = [...(flow.mask ?? []), ...(step.mask ?? [])];
+        sr.masks = await rectsFor(page, maskSelectors);
+        const ignore = [...(flow.ignore ?? []), ...(step.ignore ?? [])];
+        if (ignore.length) sr.ignore = ignore;
         await shot(sr.after);
         try {
-          const aria = await page.locator("body").ariaSnapshot();
+          const aria = await withMaskedAria(page, maskSelectors, () => page.locator("body").ariaSnapshot());
           await fs.writeFile(path.join(runDir, sr.aria), aria, "utf8");
         } catch (e) {
           await fs.writeFile(path.join(runDir, sr.aria), "", "utf8");

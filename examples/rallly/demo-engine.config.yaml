@@ -1,0 +1,8 @@
+baseUrl: https://app.rallly.co
+out: .demo-engine
+demos: demos
+brand:
+  logo: brand/logo.svg
+  accent: "#4F46E5"
+  title: Rallly
+tts: kokoro
